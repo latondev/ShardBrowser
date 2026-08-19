@@ -344,6 +344,9 @@ type ProfileForm = {
   media_audio_in: number;
   media_audio_out: number;
   media_video_in: number;
+
+  extension_mode: "all" | "custom" | "none";
+  extensions: string[];
 };
 
 // Constrained options: stay within values Chrome actually reports.
@@ -475,6 +478,9 @@ const defaultForm = (): ProfileForm => ({
   media_audio_in: 1,
   media_audio_out: 1,
   media_video_in: 1,
+
+  extension_mode: "all",
+  extensions: [],
 });
 
 function fromStored(stored: any): ProfileForm {
@@ -518,6 +524,9 @@ function fromStored(stored: any): ProfileForm {
   f.media_audio_out = md.audio_output_count ?? 1;
   f.media_video_in = md.video_input_count ?? 1;
 
+  f.extension_mode = stored?.extension_mode ?? "all";
+  f.extensions = Array.isArray(stored?.extensions) ? stored.extensions : [];
+
   return f;
 }
 
@@ -544,6 +553,8 @@ function toStored(f: ProfileForm, lib: FingerprintEntry | null): any {
   base.timezone = f.timezone;
   base.icu_locale = f.language === AUTO_LANG ? null : f.language;
   base.webrtc = f.webrtc;
+  base.extension_mode = f.extension_mode;
+  base.extensions = f.extensions;
 
   base.navigator = {
     ...(base.navigator || {}),
@@ -1877,6 +1888,12 @@ function InlineEditor({
   const [osFilter, setOsFilter] = useState<OsPlatform>(
     (currentFp?.platform as OsPlatform) ?? HOST_OS
   );
+  const [extList, setExtList] = useState<ExtensionInfo[]>([]);
+  useEffect(() => {
+    invoke<ExtensionInfo[]>("extension_list")
+      .then(setExtList)
+      .catch(() => {});
+  }, []);
   const gpusForOs = useMemo(
     () => fingerprints.filter((fp) => fp.platform === osFilter),
     [fingerprints, osFilter],
@@ -2091,6 +2108,99 @@ function InlineEditor({
             <SelectField label="Speakers" value={f.media_audio_out} onChange={(v) => u("media_audio_out", v)} options={MEDIA_COUNT_OPTIONS} />
             <SelectField label="Webcam" value={f.media_video_in} onChange={(v) => u("media_video_in", v)} options={MEDIA_COUNT_OPTIONS} />
           </div>
+
+          <div className="ie-section-title" style={{ marginTop: 10 }}>Extensions</div>
+          <label>
+            <span className="lbl">Extensions mode for this profile</span>
+            <div className="seg seg-3" style={{ marginBottom: 6 }}>
+              {(["all", "custom", "none"] as ("all" | "custom" | "none")[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`seg-btn ${f.extension_mode === m ? "active" : ""}`}
+                  onClick={() => u("extension_mode", m)}
+                >
+                  {m === "all" ? "All active" : m === "custom" ? "Custom pick" : "Disable all"}
+                </button>
+              ))}
+            </div>
+          </label>
+
+          {f.extension_mode === "custom" && (
+            <div style={{
+              background: "rgba(0,0,0,0.25)",
+              border: "1px solid var(--border, #2a2a2a)",
+              borderRadius: 8,
+              padding: "6px",
+              maxHeight: 140,
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              marginBottom: 8,
+            }}>
+              {extList.length === 0 ? (
+                <span className="muted small" style={{ padding: "4px" }}>No extensions found in Library.</span>
+              ) : (
+                extList.map((ext) => {
+                  const isChecked = f.extensions.includes(ext.id);
+                  return (
+                    <div
+                      key={ext.id}
+                      onClick={() => {
+                        const next = isChecked
+                          ? f.extensions.filter((id) => id !== ext.id)
+                          : [...f.extensions, ext.id];
+                        u("extensions", next);
+                      }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "5px 8px",
+                        background: isChecked ? "rgba(167, 139, 250, 0.12)" : "rgba(255,255,255,0.02)",
+                        border: isChecked ? "1px solid rgba(167, 139, 250, 0.3)" : "1px solid transparent",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}}
+                          style={{ cursor: "pointer", margin: 0 }}
+                        />
+                        <div style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: 4,
+                          overflow: "hidden",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: "rgba(255,255,255,0.05)",
+                          fontSize: "12px",
+                          flexShrink: 0
+                        }}>
+                          {ext.icon_base64 ? (
+                            <img src={ext.icon_base64} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                          ) : "🧩"}
+                        </div>
+                        <span style={{ fontSize: "12px", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {ext.name}
+                        </span>
+                        <span className="muted" style={{ fontSize: "10px" }}>v{ext.version}</span>
+                      </div>
+                      <span className={`status-pill ${isChecked ? "status-active" : ""}`} style={{ fontSize: "10px", padding: "1px 5px" }}>
+                        {isChecked ? "ON" : "OFF"}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
 
           <label>
             <span className="lbl">Notes</span>

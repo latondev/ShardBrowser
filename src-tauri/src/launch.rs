@@ -198,36 +198,53 @@ pub async fn launch_profile(
         cmd.arg("--remote-allow-origins=*");
     }
 
-    // Auto-load developer/unpacked extensions from global store and per-profile folder
+    // Auto-load developer/unpacked extensions with profile-level override support
     let mut ext_paths = Vec::new();
-    let disabled_set: std::collections::HashSet<String> = if let Ok(root) = store::config_root() {
-        let p = root.join("disabled_extensions.json");
-        std::fs::read_to_string(p)
-            .ok()
-            .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
-            .map(|l| l.into_iter().collect())
-            .unwrap_or_default()
+    let ext_mode = raw.get("extension_mode").and_then(|v| v.as_str()).unwrap_or("all");
+    let allowed_ext_ids: Option<std::collections::HashSet<String>> = if ext_mode == "custom" {
+        raw.get("extensions")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|s| s.as_str().map(|s| s.to_string())).collect())
     } else {
-        Default::default()
+        None
     };
 
-    if let Ok(global_ext_dir) = store::extensions_dir() {
-        if let Ok(entries) = std::fs::read_dir(&global_ext_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let id = entry.file_name().to_string_lossy().to_string();
-                if !disabled_set.contains(&id) && path.is_dir() && path.join("manifest.json").exists() {
-                    ext_paths.push(path.to_string_lossy().to_string());
+    if ext_mode != "none" {
+        let disabled_set: std::collections::HashSet<String> = if let Ok(root) = store::config_root() {
+            let p = root.join("disabled_extensions.json");
+            std::fs::read_to_string(p)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+                .map(|l| l.into_iter().collect())
+                .unwrap_or_default()
+        } else {
+            Default::default()
+        };
+
+        if let Ok(global_ext_dir) = store::extensions_dir() {
+            if let Ok(entries) = std::fs::read_dir(&global_ext_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let id = entry.file_name().to_string_lossy().to_string();
+                    if !disabled_set.contains(&id) && path.is_dir() && path.join("manifest.json").exists() {
+                        if let Some(allowed) = &allowed_ext_ids {
+                            if allowed.contains(&id) {
+                                ext_paths.push(path.to_string_lossy().to_string());
+                            }
+                        } else {
+                            ext_paths.push(path.to_string_lossy().to_string());
+                        }
+                    }
                 }
             }
         }
-    }
-    let profile_ext_dir = udd.join("extensions");
-    if let Ok(entries) = std::fs::read_dir(&profile_ext_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && path.join("manifest.json").exists() {
-                ext_paths.push(path.to_string_lossy().to_string());
+        let profile_ext_dir = udd.join("extensions");
+        if let Ok(entries) = std::fs::read_dir(&profile_ext_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && path.join("manifest.json").exists() {
+                    ext_paths.push(path.to_string_lossy().to_string());
+                }
             }
         }
     }
