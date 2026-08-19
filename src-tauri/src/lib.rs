@@ -54,6 +54,279 @@ async fn mcp_download(dir: String) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+// ---- Developer Extensions ----
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ExtensionInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub path: String,
+    pub icon_base64: Option<String>,
+    pub enabled: bool,
+    pub permissions: Vec<String>,
+    pub inspect_views: Vec<String>,
+}
+
+fn load_disabled_extensions() -> std::collections::HashSet<String> {
+    if let Ok(root) = store::config_root() {
+        let p = root.join("disabled_extensions.json");
+        if let Ok(s) = std::fs::read_to_string(p) {
+            if let Ok(list) = serde_json::from_str::<Vec<String>>(&s) {
+                return list.into_iter().collect();
+            }
+        }
+    }
+    std::collections::HashSet::new()
+}
+
+fn save_disabled_extensions(set: &std::collections::HashSet<String>) {
+    if let Ok(root) = store::config_root() {
+        let p = root.join("disabled_extensions.json");
+        let list: Vec<String> = set.iter().cloned().collect();
+        if let Ok(s) = serde_json::to_string_pretty(&list) {
+            let _ = std::fs::write(p, s);
+        }
+    }
+}
+
+fn extract_icon_base64(ext_dir: &std::path::Path, val: &serde_json::Value) -> Option<String> {
+    use base64::Engine;
+
+    let mut icon_rel_path: Option<String> = None;
+
+    if let Some(icons) = val.get("icons").and_then(|v| v.as_object()) {
+        for key in &["128", "48", "32", "16", "256"] {
+            if let Some(p) = icons.get(*key).and_then(|v| v.as_str()) {
+                icon_rel_path = Some(p.to_string());
+                break;
+            }
+        }
+        if icon_rel_path.is_none() {
+            if let Some((_, v)) = icons.iter().next() {
+                if let Some(p) = v.as_str() {
+                    icon_rel_path = Some(p.to_string());
+                }
+            }
+        }
+    }
+
+    if icon_rel_path.is_none() {
+        if let Some(action) = val.get("action").or_else(|| val.get("browser_action")) {
+            if let Some(default_icon) = action.get("default_icon") {
+                if let Some(p) = default_icon.as_str() {
+                    icon_rel_path = Some(p.to_string());
+                } else if let Some(map) = default_icon.as_object() {
+                    if let Some((_, v)) = map.iter().next() {
+                        if let Some(p) = v.as_str() {
+                            icon_rel_path = Some(p.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(rel) = icon_rel_path {
+        let icon_file = ext_dir.join(&rel);
+        if icon_file.exists() {
+            if let Ok(bytes) = std::fs::read(&icon_file) {
+                let mime = if rel.ends_with(".png") {
+                    "image/png"
+                } else if rel.ends_with(".jpg") || rel.ends_with(".jpeg") {
+                    "image/jpeg"
+                } else if rel.ends_with(".svg") {
+                    "image/svg+xml"
+                } else {
+                    "image/png"
+                };
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                return Some(format!("data:{mime};base64,{b64}"));
+            }
+        }
+    }
+
+    None
+}
+
+#[tauri::command]
+fn extension_list() -> Result<Vec<ExtensionInfo>, String> {
+    let global_ext_dir = store::extensions_dir().map_err(|e| e.to_string())?;
+    let disabled_set = load_disabled_extensions();
+    let mut list = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&global_ext_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let id = entry.file_name().to_string_lossy().to_string();
+                let manifest_file = path.join("manifest.json");
+                let mut name = id.clone();
+                let mut version = "1.0.0".to_string();
+                let mut description = String::new();
+                let mut icon_base64 = None;
+                let mut permissions = Vec::new();
+                let mut inspect_views = Vec::new();
+
+                if manifest_file.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&manifest_file) {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                            if let Some(n) = val.get("name").and_then(|v| v.as_str()) {
+                                name = n.to_string();
+                            }
+                            if let Some(v) = val.get("version").and_then(|v| v.as_str()) {
+                                version = v.to_string();
+                            }
+                            if let Some(d) = val.get("description").and_then(|v| v.as_str()) {
+                                description = d.to_string();
+                            }
+                            if let Some(perms) = val.get("permissions").and_then(|v| v.as_array()) {
+                                for p in perms {
+                                    if let Some(s) = p.as_str() {
+                                        permissions.push(s.to_string());
+                                    }
+                                }
+                            }
+                            if let Some(bg) = val.get("background").and_then(|v| v.as_object()) {
+                                if bg.get("service_worker").is_some() {
+                                    inspect_views.push("service worker (Inactive)".to_string());
+                                } else if bg.get("page").is_some() || bg.get("scripts").is_some() {
+                                    inspect_views.push("background page".to_string());
+                                }
+                            }
+                            icon_base64 = extract_icon_base64(&path, &val);
+                        }
+                    }
+                }
+
+                let enabled = !disabled_set.contains(&id);
+
+                list.push(ExtensionInfo {
+                    id,
+                    name,
+                    version,
+                    description,
+                    path: path.to_string_lossy().to_string(),
+                    icon_base64,
+                    enabled,
+                    permissions,
+                    inspect_views,
+                });
+            }
+        }
+    }
+    Ok(list)
+}
+
+#[tauri::command]
+fn extension_toggle(id: String, enabled: bool) -> Result<(), String> {
+    let mut set = load_disabled_extensions();
+    if enabled {
+        set.remove(&id);
+    } else {
+        set.insert(id);
+    }
+    save_disabled_extensions(&set);
+    Ok(())
+}
+
+#[tauri::command]
+fn extension_delete(id: String) -> Result<(), String> {
+    let global_ext_dir = store::extensions_dir().map_err(|e| e.to_string())?;
+    let target = global_ext_dir.join(&id);
+    if target.exists() && target.is_dir() {
+        std::fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
+    }
+    let mut set = load_disabled_extensions();
+    set.remove(&id);
+    save_disabled_extensions(&set);
+    Ok(())
+}
+
+#[tauri::command]
+fn extension_add(source_dir: String) -> Result<ExtensionInfo, String> {
+    let src = std::path::PathBuf::from(&source_dir);
+    if !src.exists() || !src.is_dir() {
+        return Err("Selected path is not a valid directory".to_string());
+    }
+    let manifest_file = src.join("manifest.json");
+    if !manifest_file.exists() {
+        return Err("manifest.json not found in the selected folder. Please pick an unpacked Chrome extension folder.".to_string());
+    }
+
+    let folder_name = src.file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "custom-extension".to_string());
+
+    let global_ext_dir = store::extensions_dir().map_err(|e| e.to_string())?;
+    let dest = global_ext_dir.join(&folder_name);
+
+    fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(dst)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let ty = entry.file_type()?;
+            if ty.is_dir() {
+                copy_dir_all(&entry.path(), &dst.join(entry.file_name()))?;
+            } else {
+                std::fs::copy(entry.path(), dst.join(entry.file_name()))?;
+            }
+        }
+        Ok(())
+    }
+
+    copy_dir_all(&src, &dest).map_err(|e| format!("Failed to copy extension folder: {e}"))?;
+
+    let mut name = folder_name.clone();
+    let mut version = "1.0.0".to_string();
+    let mut description = String::new();
+    let mut icon_base64 = None;
+    let mut permissions = Vec::new();
+    let mut inspect_views = Vec::new();
+
+    if let Ok(content) = std::fs::read_to_string(dest.join("manifest.json")) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(n) = val.get("name").and_then(|v| v.as_str()) {
+                name = n.to_string();
+            }
+            if let Some(v) = val.get("version").and_then(|v| v.as_str()) {
+                version = v.to_string();
+            }
+            if let Some(d) = val.get("description").and_then(|v| v.as_str()) {
+                description = d.to_string();
+            }
+            if let Some(perms) = val.get("permissions").and_then(|v| v.as_array()) {
+                for p in perms {
+                    if let Some(s) = p.as_str() {
+                        permissions.push(s.to_string());
+                    }
+                }
+            }
+            if let Some(bg) = val.get("background").and_then(|v| v.as_object()) {
+                if bg.get("service_worker").is_some() {
+                    inspect_views.push("service worker (Inactive)".to_string());
+                } else if bg.get("page").is_some() || bg.get("scripts").is_some() {
+                    inspect_views.push("background page".to_string());
+                }
+            }
+            icon_base64 = extract_icon_base64(&dest, &val);
+        }
+    }
+
+    Ok(ExtensionInfo {
+        id: folder_name,
+        name,
+        version,
+        description,
+        path: dest.to_string_lossy().to_string(),
+        icon_base64,
+        enabled: true,
+        permissions,
+        inspect_views,
+    })
+}
+
 // ---- Profiles ----
 
 #[tauri::command]
@@ -1203,6 +1476,10 @@ pub fn run() {
             cookies_export_to_file,
             cookies_import,
             mcp_download,
+            extension_list,
+            extension_add,
+            extension_delete,
+            extension_toggle,
             runtime::runtime_status,
             runtime::runtime_install,
             runtime::launcher_update_check,

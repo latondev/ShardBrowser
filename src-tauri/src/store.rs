@@ -57,3 +57,12 @@ pub fn settings_path() -> Result<PathBuf> {
 pub fn psapi_path() -> Result<PathBuf> {
     Ok(config_root()?.join("psapi.json"))
 }
+
+/// Directory for global unpacked developer extensions. Any extension folders
+/// placed here (containing manifest.json) are automatically loaded into all profiles.
+pub fn extensions_dir() -> Result<PathBuf> {
+    let p = config_root()?.join("extensions");
+    std::fs::create_dir_all(&p)?;
+    Ok(p)
+}
+

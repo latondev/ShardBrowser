@@ -98,6 +98,11 @@ pub async fn launch_profile(
     cmd.arg(format!("--fingerprint-profile={}", fp_file.display()));
     cmd.arg(format!("--user-data-dir={}", udd.display()));
     cmd.arg("--no-first-run");
+    #[cfg(target_os = "windows")]
+    {
+        cmd.arg("--no-sandbox");
+        cmd.arg("--test-type");
+    }
 
     // Disable WebGPU when profile omits `webgpu` (matches real Linux Chrome).
     let webgpu_present = raw
@@ -193,17 +198,57 @@ pub async fn launch_profile(
         cmd.arg("--remote-allow-origins=*");
     }
 
+    // Auto-load developer/unpacked extensions from global store and per-profile folder
+    let mut ext_paths = Vec::new();
+    let disabled_set: std::collections::HashSet<String> = if let Ok(root) = store::config_root() {
+        let p = root.join("disabled_extensions.json");
+        std::fs::read_to_string(p)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+            .map(|l| l.into_iter().collect())
+            .unwrap_or_default()
+    } else {
+        Default::default()
+    };
+
+    if let Ok(global_ext_dir) = store::extensions_dir() {
+        if let Ok(entries) = std::fs::read_dir(&global_ext_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let id = entry.file_name().to_string_lossy().to_string();
+                if !disabled_set.contains(&id) && path.is_dir() && path.join("manifest.json").exists() {
+                    ext_paths.push(path.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    let profile_ext_dir = udd.join("extensions");
+    if let Ok(entries) = std::fs::read_dir(&profile_ext_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path.join("manifest.json").exists() {
+                ext_paths.push(path.to_string_lossy().to_string());
+            }
+        }
+    }
+    if !ext_paths.is_empty() {
+        let joined = ext_paths.join(",");
+        cmd.arg(format!("--load-extension={joined}"));
+        cmd.arg(format!("--disable-extensions-except={joined}"));
+        eprintln!("[launcher] Auto-loaded {} extension(s): {}", ext_paths.len(), joined);
+    }
+
     if headless {
         cmd.arg("--headless=new");
     }
 
     cmd.stdout(Stdio::null()).stderr(Stdio::null());
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        // 0x08000000 = CREATE_NO_WINDOW — suppress the brief console flash
-        // when a Tauri GUI app spawns the engine binary.
-        cmd.creation_flags(0x08000000);
+    if headless {
+        #[cfg(target_os = "windows")]
+        {
+            // 0x08000000 = CREATE_NO_WINDOW for headless process
+            cmd.creation_flags(0x08000000);
+        }
     }
     let child = cmd.spawn().context("spawn ShardX")?;
     let pid = Tracker::shared().track(profile_id.to_string(), child, stored.meta.temporary);

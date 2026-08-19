@@ -287,7 +287,7 @@ type ApiInfo = {
   base_url: string;
   token: string;
 };
-type Section = "browsers" | "proxies" | "proxyshard" | "fingerprints" | "settings";
+type Section = "browsers" | "proxies" | "proxyshard" | "fingerprints" | "extensions" | "settings";
 
 /// Library fingerprint backing the editor GPU select; payload supplies the coherent base.
 type FingerprintEntry = {
@@ -661,6 +661,7 @@ export default function App() {
             {section === "proxies" && <ProxiesView />}
             {section === "proxyshard" && <ProxyShardView />}
             {section === "fingerprints" && <FingerprintsView />}
+            {section === "extensions" && <ExtensionsView />}
             {section === "settings" && <SettingsView />}
           </main>
           <ToastHost />
@@ -691,7 +692,10 @@ function Sidebar({
     },
     {
       label: "Library",
-      items: [{ id: "fingerprints", label: "Fingerprints", svg: <IconHex /> }],
+      items: [
+        { id: "fingerprints", label: "Fingerprints", svg: <IconHex /> },
+        { id: "extensions", label: "Extensions", svg: <IconExtension /> },
+      ],
     },
     {
       label: "System",
@@ -815,6 +819,11 @@ const IconWire = () => (
 const IconHex = () => (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
     <path d="M7 1L12 4V10L7 13L2 10V4Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+  </svg>
+);
+const IconExtension = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5a2.5 2.5 0 0 1 0 5H2v4c0 1.1.9 2 2 2h3.8v-1.5a2.5 2.5 0 0 1 5 0V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z" />
   </svg>
 );
 const IconCart = () => (
@@ -4729,6 +4738,583 @@ function PsBuyCard({ onPurchased }: { onPurchased: () => void }) {
   );
 }
 
+type ExtensionInfo = {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  path: string;
+  icon_base64?: string | null;
+  enabled: boolean;
+  permissions?: string[];
+  inspect_views?: string[];
+};
+
+function ExtensionDetailModal({
+  ext,
+  onClose,
+  onRemove,
+  onToggle,
+}: {
+  ext: ExtensionInfo;
+  onClose: () => void;
+  onRemove: (id: string, name: string) => void;
+  onToggle: (id: string, enabled: boolean) => void;
+}) {
+  return (
+    <div className="dialog-bg" onClick={onClose}>
+      <div className="dialog" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+        <header className="dialog-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{
+              width: 36,
+              height: 36,
+              borderRadius: 8,
+              background: "rgba(255, 255, 255, 0.05)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+            }}>
+              {ext.icon_base64 ? (
+                <img src={ext.icon_base64} alt={ext.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+              ) : (
+                <span style={{ fontSize: "20px" }}>🧩</span>
+              )}
+            </div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: "16px" }}>{ext.name}</h2>
+              <span className="muted small">Version {ext.version}</span>
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}>✕</button>
+        </header>
+
+        <div className="dialog-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div>
+            <span className="lbl" style={{ display: "block", marginBottom: 4 }}>Description</span>
+            <p className="muted small" style={{ margin: 0, lineHeight: 1.45 }}>
+              {ext.description || "No description provided."}
+            </p>
+          </div>
+
+          <div>
+            <span className="lbl" style={{ display: "block", marginBottom: 4 }}>Extension ID</span>
+            <span className="mono small" style={{ opacity: 0.85, wordBreak: "break-all" }}>{ext.id}</span>
+          </div>
+
+          <div>
+            <span className="lbl" style={{ display: "block", marginBottom: 4 }}>Source Location</span>
+            <CopyField value={ext.path} />
+          </div>
+
+          {ext.permissions && ext.permissions.length > 0 && (
+            <div>
+              <span className="lbl" style={{ display: "block", marginBottom: 6 }}>Permissions</span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {ext.permissions.map((p, i) => (
+                  <span key={i} className="status-pill" style={{ fontSize: "11px", padding: "2px 8px" }}>
+                    {p}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {ext.inspect_views && ext.inspect_views.length > 0 && (
+            <div>
+              <span className="lbl" style={{ display: "block", marginBottom: 4 }}>Inspect Views</span>
+              <span style={{ color: "#60a5fa", fontSize: "12px" }}>{ext.inspect_views.join(", ")}</span>
+            </div>
+          )}
+
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "12px 14px",
+            background: "rgba(255, 255, 255, 0.03)",
+            borderRadius: 8,
+            border: "1px solid var(--border, #2a2a2a)",
+          }}>
+            <div>
+              <strong style={{ fontSize: "13px" }}>Auto-load in Profiles</strong>
+              <p className="muted small" style={{ margin: "2px 0 0 0", fontSize: "11px" }}>
+                Inject this extension via --load-extension into all profiles
+              </p>
+            </div>
+            <div
+              onClick={() => onToggle(ext.id, !ext.enabled)}
+              style={{
+                width: 42,
+                height: 24,
+                borderRadius: 12,
+                background: ext.enabled ? "#10b981" : "rgba(255, 255, 255, 0.15)",
+                cursor: "pointer",
+                position: "relative",
+                transition: "background 0.2s ease",
+              }}
+            >
+              <div style={{
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                background: "#fff",
+                position: "absolute",
+                top: 3,
+                left: ext.enabled ? 21 : 3,
+                transition: "left 0.2s ease",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+              }} />
+            </div>
+          </div>
+        </div>
+
+        <footer className="dialog-foot" style={{ display: "flex", justifyContent: "space-between" }}>
+          <button className="btn-ghost danger" onClick={() => { onClose(); onRemove(ext.id, ext.name); }}>
+            <Icon.Trash /> Remove
+          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn-ghost" onClick={() => openPath(ext.path)}>
+              Open Folder
+            </button>
+            <button className="btn-primary" onClick={onClose}>
+              Done
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function ExtensionsView() {
+  const [extensions, setExtensions] = useState<ExtensionInfo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [detailModal, setDetailModal] = useState<ExtensionInfo | null>(null);
+
+  const loadExtensions = () => {
+    invoke<ExtensionInfo[]>("extension_list")
+      .then(setExtensions)
+      .catch((e) => toast.err(String(e)));
+  };
+
+  useEffect(() => {
+    loadExtensions();
+  }, []);
+
+  const addExtension = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Select Unpacked Extension Folder (containing manifest.json)",
+      });
+      if (typeof selected !== "string") return;
+      setLoading(true);
+      const added = await invoke<ExtensionInfo>("extension_add", { sourceDir: selected });
+      toast.ok(`Extension "${added.name}" added successfully`);
+      loadExtensions();
+    } catch (e) {
+      toast.err(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleExtension = async (id: string, enabled: boolean) => {
+    try {
+      await invoke("extension_toggle", { id, enabled });
+      setExtensions((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, enabled } : e))
+      );
+      if (detailModal && detailModal.id === id) {
+        setDetailModal({ ...detailModal, enabled });
+      }
+      toast.ok(enabled ? "Extension enabled" : "Extension disabled");
+    } catch (e) {
+      toast.err(String(e));
+    }
+  };
+
+  const deleteExtension = async (id: string, name: string) => {
+    const ok = await confirmModal({
+      title: "Remove Extension",
+      message: `Are you sure you want to remove extension "${name}"? It will no longer be loaded into profiles.`,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await invoke("extension_delete", { id });
+      toast.ok(`Extension "${name}" removed`);
+      loadExtensions();
+    } catch (e) {
+      toast.err(String(e));
+    }
+  };
+
+  const openFolder = (path: string) => {
+    openPath(path).catch(() => {});
+  };
+
+  const filtered = extensions.filter(
+    (e) =>
+      e.name.toLowerCase().includes(search.toLowerCase()) ||
+      e.description.toLowerCase().includes(search.toLowerCase()) ||
+      e.id.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <section className="page extensions-page">
+      <Topbar crumbs={["Library", "Extensions"]} search={search} onSearch={setSearch} />
+      <div className="page-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div className="page-title">
+          <h1 style={{ margin: 0 }}>Extensions</h1>
+          <p className="muted small" style={{ margin: "4px 0 0 0" }}>
+            Unpacked developer extensions automatically loaded into all browser profiles.
+          </p>
+        </div>
+        <div className="page-actions">
+          <button className="btn-primary" onClick={addExtension} disabled={loading}>
+            + Add Extension Folder
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        {filtered.length === 0 ? (
+          <div className="card" style={{ padding: "48px 24px", textAlign: "center", border: "1px dashed var(--border, #333)", borderRadius: 10 }}>
+            <div style={{ fontSize: "40px", marginBottom: 14 }}>🧩</div>
+            <h3 style={{ margin: "0 0 8px 0" }}>No Developer Extensions Added</h3>
+            <p className="muted small" style={{ maxWidth: 480, margin: "0 auto 20px auto", lineHeight: 1.5 }}>
+              Add unpacked Chrome extension folders (containing <code>manifest.json</code>).
+              They will be automatically injected into every launched profile via <code>--load-extension</code>.
+            </p>
+            <button className="btn-primary" onClick={addExtension} disabled={loading}>
+              + Add Extension Folder
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: 16 }}>
+            {filtered.map((ext) => (
+              <div
+                key={ext.id}
+                className="card"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  padding: "18px 20px",
+                  borderRadius: 12,
+                  border: "1px solid var(--border, #2a2a2a)",
+                  background: "var(--card-bg, #16181f)",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+                  minHeight: 180,
+                  opacity: ext.enabled ? 1 : 0.65,
+                  transition: "opacity 0.2s ease, border-color 0.2s ease",
+                }}
+              >
+                <div>
+                  <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+                    {/* Real Extension Icon */}
+                    <div style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 8,
+                      background: "rgba(255, 255, 255, 0.05)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                      overflow: "hidden",
+                      border: "1px solid rgba(255,255,255,0.06)",
+                    }}>
+                      {ext.icon_base64 ? (
+                        <img src={ext.icon_base64} alt={ext.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                      ) : (
+                        <span style={{ fontSize: "22px" }}>🧩</span>
+                      )}
+                    </div>
+
+                    {/* Main Content */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div style={{ paddingRight: 10 }}>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                            <strong style={{ fontSize: "15px", color: "var(--fg, #fff)" }}>{ext.name}</strong>
+                            <span className="muted" style={{ fontSize: "13px" }}>{ext.version}</span>
+                          </div>
+                          <p className="muted small" style={{ margin: "5px 0 8px 0", lineHeight: 1.45, minHeight: 36 }}>
+                            {ext.description || "Unpacked developer extension."}
+                          </p>
+                        </div>
+
+                        {/* Chrome-style Green Toggle Switch */}
+                        <div
+                          onClick={() => toggleExtension(ext.id, !ext.enabled)}
+                          title={ext.enabled ? "Enabled (Click to disable)" : "Disabled (Click to enable)"}
+                          style={{
+                            width: 40,
+                            height: 22,
+                            borderRadius: 11,
+                            background: ext.enabled ? "#10b981" : "rgba(255, 255, 255, 0.15)",
+                            cursor: "pointer",
+                            position: "relative",
+                            transition: "background 0.2s ease",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <div style={{
+                            width: 16,
+                            height: 16,
+                            borderRadius: "50%",
+                            background: "#fff",
+                            position: "absolute",
+                            top: 3,
+                            left: ext.enabled ? 21 : 3,
+                            transition: "left 0.2s ease",
+                            boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                          }} />
+                        </div>
+                      </div>
+
+                      {/* ID and Inspect Views */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: "12px", color: "var(--muted, #888)", marginTop: 2 }}>
+                        <div>
+                          <span>ID: </span>
+                          <span className="mono" style={{ opacity: 0.85 }}>{ext.id}</span>
+                        </div>
+                        {ext.inspect_views && ext.inspect_views.length > 0 && (
+                          <div>
+                            <span>Inspect views: </span>
+                            <span style={{ color: "#60a5fa" }}>{ext.inspect_views.join(", ")}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bottom Action Bar */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginTop: 14,
+                  paddingTop: 12,
+                  borderTop: "1px solid var(--border, #242630)",
+                }}>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn-ghost btn-sm" onClick={() => setDetailModal(ext)}>
+                      Details
+                    </button>
+                    <button className="btn-ghost danger btn-sm" onClick={() => deleteExtension(ext.id, ext.name)}>
+                      Remove
+                    </button>
+                    <button className="btn-ghost btn-sm" onClick={loadExtensions} title="Reload extension manifest">
+                      Reload
+                    </button>
+                    <button className="btn-ghost btn-sm" onClick={() => openFolder(ext.path)} title="Open in Windows Explorer">
+                      Folder
+                    </button>
+                  </div>
+
+                  <span className="muted small" style={{ fontSize: "11px" }}>
+                    {ext.enabled ? (
+                      <span style={{ color: "#10b981" }}>● Active in profiles</span>
+                    ) : (
+                      <span style={{ opacity: 0.7 }}>○ Disabled</span>
+                    )}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {detailModal && (
+        <ExtensionDetailModal
+          ext={detailModal}
+          onClose={() => setDetailModal(null)}
+          onRemove={deleteExtension}
+          onToggle={toggleExtension}
+        />
+      )}
+    </section>
+  );
+}
+
+function ExtensionsCard() {
+  const [extensions, setExtensions] = useState<ExtensionInfo[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const loadExtensions = () => {
+    invoke<ExtensionInfo[]>("extension_list")
+      .then(setExtensions)
+      .catch((e) => toast.err(String(e)));
+  };
+
+  useEffect(() => {
+    loadExtensions();
+  }, []);
+
+  const addExtension = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Select Unpacked Extension Folder (containing manifest.json)",
+      });
+      if (typeof selected !== "string") return;
+      setLoading(true);
+      const added = await invoke<ExtensionInfo>("extension_add", { sourceDir: selected });
+      toast.ok(`Extension "${added.name}" added successfully`);
+      loadExtensions();
+    } catch (e) {
+      toast.err(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleExtension = async (id: string, enabled: boolean) => {
+    try {
+      await invoke("extension_toggle", { id, enabled });
+      setExtensions((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, enabled } : e))
+      );
+      toast.ok(enabled ? "Extension enabled" : "Extension disabled");
+    } catch (e) {
+      toast.err(String(e));
+    }
+  };
+
+  const deleteExtension = async (id: string, name: string) => {
+    const ok = await confirmModal({
+      title: "Remove Extension",
+      message: `Are you sure you want to remove extension "${name}"? It will no longer be loaded into profiles.`,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await invoke("extension_delete", { id });
+      toast.ok(`Extension "${name}" removed`);
+      loadExtensions();
+    } catch (e) {
+      toast.err(String(e));
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 14 }}>
+      <div className="card-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div>
+          <h3>🧩 Developer Extensions</h3>
+          <p className="muted small" style={{ marginTop: 4 }}>
+            Unpacked Chrome extensions added here are <strong>automatically loaded into every launched browser profile</strong> via <code>--load-extension</code>.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn-primary" onClick={addExtension} disabled={loading} style={{ whiteSpace: "nowrap" }}>
+            + Add Extension Folder
+          </button>
+        </div>
+      </div>
+
+      {extensions.length === 0 ? (
+        <div style={{ padding: "24px 16px", textAlign: "center", border: "1px dashed var(--border, #333)", borderRadius: 8, color: "var(--muted, #888)" }}>
+          <p style={{ margin: 0, fontWeight: 500 }}>No developer extensions installed yet.</p>
+          <span className="small" style={{ opacity: 0.8 }}>Click <strong>"+ Add Extension Folder"</strong> to choose any Chrome extension directory containing <code>manifest.json</code>.</span>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {extensions.map((ext) => (
+            <div
+              key={ext.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "12px 16px",
+                background: "var(--card-bg-subtle, rgba(255,255,255,0.03))",
+                border: "1px solid var(--border, #2a2a2a)",
+                borderRadius: 8,
+                opacity: ext.enabled ? 1 : 0.6,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0, paddingRight: 12 }}>
+                <div style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 6,
+                  background: "rgba(255, 255, 255, 0.05)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  overflow: "hidden",
+                }}>
+                  {ext.icon_base64 ? (
+                    <img src={ext.icon_base64} alt={ext.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                  ) : (
+                    <span style={{ fontSize: "18px" }}>🧩</span>
+                  )}
+                </div>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <strong style={{ fontSize: "14px" }}>{ext.name}</strong>
+                    <span className="muted small">v{ext.version}</span>
+                  </div>
+                  {ext.description && (
+                    <p className="muted small" style={{ margin: "2px 0 0 0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {ext.description}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div
+                  onClick={() => toggleExtension(ext.id, !ext.enabled)}
+                  style={{
+                    width: 36,
+                    height: 20,
+                    borderRadius: 10,
+                    background: ext.enabled ? "#10b981" : "rgba(255, 255, 255, 0.15)",
+                    cursor: "pointer",
+                    position: "relative",
+                    transition: "background 0.2s ease",
+                  }}
+                >
+                  <div style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#fff",
+                    position: "absolute",
+                    top: 3,
+                    left: ext.enabled ? 19 : 3,
+                    transition: "left 0.2s ease",
+                  }} />
+                </div>
+                <button
+                  className="btn-ghost danger btn-sm"
+                  onClick={() => deleteExtension(ext.id, ext.name)}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsView() {
   const [s, setS] = useState<Settings>({
     browser_path: null,
@@ -4852,6 +5438,8 @@ function SettingsView() {
         )}
       </div>
 
+      <ExtensionsCard />
+
       <div className="card" style={{ marginBottom: 14 }}>
         <h3>MCP server</h3>
         <p className="muted small">
@@ -4871,3 +5459,4 @@ function SettingsView() {
     </section>
   );
 }
+
