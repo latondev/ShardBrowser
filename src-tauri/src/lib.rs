@@ -327,6 +327,157 @@ fn extension_add(source_dir: String) -> Result<ExtensionInfo, String> {
     })
 }
 
+// ---- Autonomous AI Agent ----
+
+static AGENT_CHILD: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
+
+#[derive(serde::Deserialize)]
+pub struct AiAgentConfig {
+    pub profile_id: Option<String>,
+    pub prompt: String,
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+    pub model: Option<String>,
+    pub password: Option<String>,
+    pub max_steps: Option<u32>,
+}
+
+#[tauri::command]
+fn ai_agent_start(app: tauri::AppHandle, config: AiAgentConfig) -> Result<(), String> {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+    use tauri::Emitter;
+
+    // Terminate existing agent if running
+    if let Ok(mut g) = AGENT_CHILD.lock() {
+        if let Some(mut child) = g.take() {
+            let _ = child.kill();
+        }
+    }
+
+    // Get current launcher settings for API port & token
+    let s = settings::load().map_err(|e| e.to_string())?;
+    let port = s.api_port;
+    let secret = s.api_secret;
+    let token = api::long_lived_token(&secret).unwrap_or_default();
+    let launcher_url = format!("http://127.0.0.1:{port}");
+
+    // Resolve project root
+    let agent_script = std::env::current_dir()
+        .map_err(|e| e.to_string())?
+        .join("agent")
+        .join("agent_runner.mjs");
+
+    if !agent_script.exists() {
+        return Err(format!("Agent runner script not found at {}", agent_script.display()));
+    }
+
+    let mut cmd = Command::new("node");
+    cmd.arg(&agent_script);
+    if let Some(pid) = config.profile_id {
+        if !pid.is_empty() {
+            cmd.arg(format!("--profile-id={pid}"));
+        }
+    }
+    cmd.arg(format!("--prompt={}", config.prompt));
+    if let Some(url) = config.base_url {
+        if !url.is_empty() {
+            cmd.arg(format!("--base-url={url}"));
+        }
+    }
+    if let Some(key) = config.api_key {
+        if !key.is_empty() {
+            cmd.arg(format!("--api-key={key}"));
+        }
+    }
+    if let Some(m) = config.model {
+        if !m.is_empty() {
+            cmd.arg(format!("--model={m}"));
+        }
+    }
+    if let Some(p) = config.password {
+        if !p.is_empty() {
+            cmd.arg(format!("--password={p}"));
+        }
+    }
+    if let Some(steps) = config.max_steps {
+        cmd.arg(format!("--max-steps={steps}"));
+    }
+    cmd.arg(format!("--launcher-url={launcher_url}"));
+    cmd.arg(format!("--api-token={token}"));
+
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn agent runner: {e}"))?;
+    let stdout = child.stdout.take().ok_or("Failed to capture agent stdout")?;
+
+    if let Ok(mut g) = AGENT_CHILD.lock() {
+        *g = Some(child);
+    }
+
+    // Spawn background reader thread
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                let trimmed = l.trim();
+                if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                        let _ = app.emit("ai-agent-event", val);
+                    }
+                } else if !trimmed.is_empty() {
+                    let _ = app.emit("ai-agent-event", serde_json::json!({
+                        "type": "log",
+                        "message": trimmed
+                    }));
+                }
+            }
+        }
+
+        // Clean up
+        if let Ok(mut g) = AGENT_CHILD.lock() {
+            g.take();
+        }
+        let _ = app.emit("ai-agent-event", serde_json::json!({
+            "type": "status",
+            "status": "stopped"
+        }));
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn ai_agent_stop(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Emitter;
+    if let Ok(mut g) = AGENT_CHILD.lock() {
+        if let Some(mut child) = g.take() {
+            let _ = child.kill();
+        }
+    }
+    let _ = app.emit("ai-agent-event", serde_json::json!({
+        "type": "status",
+        "status": "stopped"
+    }));
+    Ok(())
+}
+
+#[tauri::command]
+fn ai_agent_is_running() -> Result<bool, String> {
+    if let Ok(g) = AGENT_CHILD.lock() {
+        Ok(g.is_some())
+    } else {
+        Ok(false)
+    }
+}
+
 // ---- Profiles ----
 
 #[tauri::command]
@@ -1480,6 +1631,9 @@ pub fn run() {
             extension_add,
             extension_delete,
             extension_toggle,
+            ai_agent_start,
+            ai_agent_stop,
+            ai_agent_is_running,
             runtime::runtime_status,
             runtime::runtime_install,
             runtime::launcher_update_check,

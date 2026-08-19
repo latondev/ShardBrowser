@@ -287,7 +287,7 @@ type ApiInfo = {
   base_url: string;
   token: string;
 };
-type Section = "browsers" | "proxies" | "proxyshard" | "fingerprints" | "extensions" | "settings";
+type Section = "browsers" | "proxies" | "proxyshard" | "ai_agent" | "fingerprints" | "extensions" | "settings";
 
 /// Library fingerprint backing the editor GPU select; payload supplies the coherent base.
 type FingerprintEntry = {
@@ -610,6 +610,7 @@ type Theme = "dark" | "light";
 
 export default function App() {
   const [section, setSection] = useState<Section>("browsers");
+  const [aiProfileTarget, setAiProfileTarget] = useState<string>("");
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem("shardx-theme") as Theme) || "dark",
   );
@@ -617,6 +618,12 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("shardx-theme", theme);
   }, [theme]);
+
+  const handleOpenAi = (profileId: string) => {
+    setAiProfileTarget(profileId);
+    setSection("ai_agent");
+  };
+
   return (
     <>
       {/* Custom title bar; drag-region outside .app stays clickable above modals. */}
@@ -668,9 +675,15 @@ export default function App() {
             onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
           />
           <main className="main">
-            {section === "browsers" && <BrowsersView />}
+            {section === "browsers" && <BrowsersView onOpenAi={handleOpenAi} />}
             {section === "proxies" && <ProxiesView />}
             {section === "proxyshard" && <ProxyShardView />}
+            {section === "ai_agent" && (
+              <AiAgentView
+                initialProfileId={aiProfileTarget}
+                onClearInitialProfile={() => setAiProfileTarget("")}
+              />
+            )}
             {section === "fingerprints" && <FingerprintsView />}
             {section === "extensions" && <ExtensionsView />}
             {section === "settings" && <SettingsView />}
@@ -699,6 +712,12 @@ function Sidebar({
         { id: "browsers", label: "Browsers", svg: <IconShard /> },
         { id: "proxies", label: "Proxies", svg: <IconWire /> },
         { id: "proxyshard", label: "ProxyShard", svg: <IconCart /> },
+      ],
+    },
+    {
+      label: "Automation",
+      items: [
+        { id: "ai_agent", label: "AI Agent", svg: <IconBot /> },
       ],
     },
     {
@@ -835,6 +854,15 @@ const IconHex = () => (
 const IconExtension = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5a2.5 2.5 0 0 1 0 5H2v4c0 1.1.9 2 2 2h3.8v-1.5a2.5 2.5 0 0 1 5 0V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z" />
+  </svg>
+);
+const IconBot = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="10" rx="2" />
+    <circle cx="12" cy="5" r="2" />
+    <path d="M12 7v4" />
+    <line x1="8" y1="16" x2="8.01" y2="16" />
+    <line x1="16" y1="16" x2="16.01" y2="16" />
   </svg>
 );
 const IconCart = () => (
@@ -1026,7 +1054,7 @@ function useStoreChanged(onChange: () => void) {
 
 // ---- Browsers view ----
 
-function BrowsersView() {
+function BrowsersView({ onOpenAi }: { onOpenAi?: (id: string) => void } = {}) {
   const [profiles, setProfiles] = useState<ProfileMeta[]>([]);
   const [proxies, setProxies] = useState<ProxyEntry[]>([]);
   const [search, setSearch] = useState("");
@@ -1265,6 +1293,7 @@ function BrowsersView() {
   // Per-profile action menu shared by right-click and ⋮ button.
   const profileMenu = (p: ProfileMeta) => [
     { label: running[p.id] ? "Stop" : "Launch", onClick: () => startStop(p) },
+    { label: "🤖 Run AI Agent…", onClick: () => onOpenAi?.(p.id) },
     { label: "Edit", onClick: () => expand(p.id) },
     { label: "Clone", onClick: () => cloneProfile(p.id) },
     { label: p.pinned ? "Unpin" : "Pin to top", onClick: () => togglePin(p) },
@@ -1734,6 +1763,7 @@ function BrowsersView() {
                     <Icon.Pin />
                   </button>
                   <button className="icon-btn" onClick={() => expand(p.id)} title="Edit"><Icon.Edit /></button>
+                  <button className="icon-btn" onClick={() => onOpenAi?.(p.id)} title="Run Autonomous AI Agent"><IconBot /></button>
                   <button className="icon-btn" onClick={() => cloneProfile(p.id)} title="Clone"><Icon.Clone /></button>
                   <button className="icon-btn danger" onClick={() => remove(p.id)} title="Delete"><Icon.Trash /></button>
                   <button
@@ -4903,6 +4933,494 @@ function PsBuyCard({ onPurchased }: { onPurchased: () => void }) {
         </>
       )}
     </div>
+  );
+}
+
+function AiAgentView({
+  initialProfileId,
+  onClearInitialProfile,
+}: {
+  initialProfileId?: string;
+  onClearInitialProfile?: () => void;
+}) {
+  const [profiles, setProfiles] = useState<ProfileMeta[]>([]);
+  const [profileId, setProfileId] = useState<string>(initialProfileId || "");
+  const [prompt, setPrompt] = useState<string>(
+    "Tự động đăng ký tài khoản GitHub bằng email tạm thời UnlimitMail, lấy OTP và kích hoạt 2FA qua 2fa.page."
+  );
+  const [baseUrl, setBaseUrl] = useState<string>(
+    () => localStorage.getItem("shardx_ai_base_url") || "https://api.xkiro.com/v1"
+  );
+  const [apiKey, setApiKey] = useState<string>(
+    () => localStorage.getItem("shardx_ai_api_key") || "sk-xt-dfa9623373697bc9c6d720f7b974e459b54189998b56de42"
+  );
+  const [model, setModel] = useState<string>(
+    () => localStorage.getItem("shardx_ai_model") || "qwen/qwen3.8-max"
+  );
+  const [maxSteps, setMaxSteps] = useState<number>(35);
+  const [showSettings, setShowSettings] = useState<boolean>(false);
+
+  const [running, setRunning] = useState<boolean>(false);
+  const [status, setStatus] = useState<string>("idle");
+  const [currentStep, setCurrentStep] = useState<number>(0);
+  const [totalSteps, setTotalSteps] = useState<number>(35);
+  const [currentThought, setCurrentThought] = useState<string>("");
+  const [currentAction, setCurrentAction] = useState<string>("");
+  const [currentSelector, setCurrentSelector] = useState<string>("");
+  const [currentValue, setCurrentValue] = useState<string>("");
+  const [currentUrl, setCurrentUrl] = useState<string>("");
+  const [screenshot, setScreenshot] = useState<string | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [result, setResult] = useState<{ success: boolean; result: string; data?: any } | null>(null);
+
+  const logsEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    invoke<ProfileMeta[]>("profile_list").then(setProfiles).catch(() => {});
+    invoke<boolean>("ai_agent_is_running").then((r) => {
+      setRunning(r);
+      if (r) setStatus("running");
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (initialProfileId) {
+      setProfileId(initialProfileId);
+      onClearInitialProfile?.();
+    }
+  }, [initialProfileId]);
+
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<any>("ai-agent-event", (event) => {
+      const payload = event.payload;
+      if (!payload) return;
+
+      if (payload.type === "status") {
+        setStatus(payload.status);
+        if (payload.status === "stopped" || payload.status === "success" || payload.status === "error" || payload.status === "completed") {
+          setRunning(false);
+        } else {
+          setRunning(true);
+        }
+      } else if (payload.type === "step") {
+        setCurrentStep(payload.step);
+        setTotalSteps(payload.maxSteps || 35);
+        if (payload.thought) setCurrentThought(payload.thought);
+        if (payload.action) setCurrentAction(payload.action);
+        if (payload.selector) setCurrentSelector(payload.selector);
+        if (payload.value) setCurrentValue(payload.value);
+        if (payload.url) setCurrentUrl(payload.url);
+        if (payload.screenshot) setScreenshot(payload.screenshot);
+      } else if (payload.type === "step_start") {
+        setCurrentStep(payload.step);
+        if (payload.url) setCurrentUrl(payload.url);
+        if (payload.screenshot) setScreenshot(payload.screenshot);
+      } else if (payload.type === "log") {
+        const time = new Date().toLocaleTimeString();
+        setLogs((prev) => [...prev.slice(-150), `[${time}] ${payload.message}`]);
+      } else if (payload.type === "result") {
+        setResult({
+          success: payload.success,
+          result: payload.result,
+          data: payload.data,
+        });
+        if (payload.success) toast.ok("AI Agent completed task successfully!");
+      } else if (payload.type === "error") {
+        toast.err(`AI Agent Error: ${payload.error}`);
+        const time = new Date().toLocaleTimeString();
+        setLogs((prev) => [...prev, `[${time}] ❌ ERROR: ${payload.error}`]);
+      }
+    }).then((fn) => { unlisten = fn; });
+
+    return () => { unlisten?.(); };
+  }, []);
+
+  const startAgent = async () => {
+    if (!prompt.trim()) {
+      toast.err("Please enter a task prompt");
+      return;
+    }
+    setRunning(true);
+    setStatus("initializing");
+    setLogs([`[${new Date().toLocaleTimeString()}] 🚀 Initiating autonomous AI Agent...`]);
+    setResult(null);
+    setCurrentStep(0);
+    setCurrentThought("Starting browser profile and connecting Vision LLM...");
+    setCurrentAction("init");
+    setCurrentSelector("");
+    setCurrentValue("");
+
+    localStorage.setItem("shardx_ai_base_url", baseUrl);
+    localStorage.setItem("shardx_ai_api_key", apiKey);
+    localStorage.setItem("shardx_ai_model", model);
+
+    try {
+      await invoke("ai_agent_start", {
+        config: {
+          profile_id: profileId ? profileId : null,
+          prompt,
+          base_url: baseUrl,
+          api_key: apiKey,
+          model,
+          password: `ShardX@2026!Pass#${Math.floor(1000 + Math.random() * 9000)}`,
+          max_steps: maxSteps,
+        }
+      });
+      toast.ok("AI Agent loop running");
+    } catch (e) {
+      setRunning(false);
+      setStatus("error");
+      toast.err(String(e));
+    }
+  };
+
+  const stopAgent = async () => {
+    try {
+      await invoke("ai_agent_stop");
+      setRunning(false);
+      setStatus("stopped");
+      toast.ok("AI Agent stopped");
+    } catch (e) {
+      toast.err(String(e));
+    }
+  };
+
+  const presets = [
+    {
+      title: "🚀 GitHub Signup + 2FA",
+      desc: "Lấy email tạm UnlimitMail, đăng ký GitHub, vượt captcha/form, lấy OTP qua iframe và kích hoạt 2FA qua 2fa.page.",
+      prompt: "Tự động đăng ký tài khoản GitHub bằng email tạm thời UnlimitMail, lấy OTP qua iframe và kích hoạt 2FA qua 2fa.page. Xuất báo cáo email|pass|2fa khi xong.",
+    },
+    {
+      title: "🛡️ Account Warm-up (Nuôi Nick)",
+      desc: "Tìm kiếm tin tức Google, lướt đọc 2 bài báo VnExpress và xem 1 video YouTube trong 2 phút để tích lũy cookie uy tín.",
+      prompt: "Mở Google tìm kiếm tin tức công nghệ, lướt đọc 2 bài báo VnExpress và xem 1 video YouTube trong 2 phút để tích lũy cookie uy tín.",
+    },
+    {
+      title: "🔑 Login & Extract Cookies",
+      desc: "Mở trang đăng nhập và trích xuất toàn bộ cookie phiên làm việc.",
+      prompt: "Truy cập trang web, tiến hành đăng nhập và trích xuất toàn bộ cookie phiên làm việc để xuất báo cáo.",
+    },
+    {
+      title: "🛒 E-commerce Price Scrape",
+      desc: "Tìm kiếm sản phẩm trên sàn TMĐT và thu thập danh sách giá.",
+      prompt: "Truy cập trang thương mại điện tử, tìm kiếm từ khóa và thu thập thông tin giá của 5 sản phẩm đầu tiên.",
+    },
+  ];
+
+  return (
+    <section className="page ai-agent-page">
+      <div className="page-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+        <div>
+          <h1 style={{ margin: 0, display: "flex", alignItems: "center", gap: 10 }}>
+            <span>🤖 AI Agent Studio</span>
+            <span className={`status-pill ${running ? "status-active" : ""}`} style={{ fontSize: "12px", padding: "2px 8px" }}>
+              {status.toUpperCase()}
+            </span>
+          </h1>
+          <p className="muted small" style={{ margin: "4px 0 0 0" }}>
+            Autonomous AI browser agent with Vision LLM reasoning, multi-tab control, and auto problem solving.
+          </p>
+        </div>
+        
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className={`btn-ghost ${showSettings ? "active" : ""}`} onClick={() => setShowSettings(!showSettings)}>
+            ⚙️ AI Config
+          </button>
+          {running ? (
+            <button className="btn-ghost danger" onClick={stopAgent}>
+              <Icon.Stop /> Stop Agent
+            </button>
+          ) : (
+            <button className="btn-primary" onClick={startAgent}>
+              <Icon.Play /> Start AI Task
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Collapsible AI Config */}
+      {showSettings && (
+        <div className="card" style={{ marginBottom: 16, padding: "16px 20px", background: "rgba(167, 139, 250, 0.05)", border: "1px solid rgba(167, 139, 250, 0.2)" }}>
+          <h4 style={{ margin: "0 0 12px 0", fontSize: "14px", color: "var(--fg, #fff)" }}>⚙️ Vision LLM Credentials</h4>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr 1fr", gap: 12 }}>
+            <label>
+              <span className="lbl">Base URL</span>
+              <input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.xkiro.com/v1" />
+            </label>
+            <label>
+              <span className="lbl">API Key</span>
+              <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." />
+            </label>
+            <label>
+              <span className="lbl">Vision Model</span>
+              <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="qwen/qwen3.8-max" />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Task Configuration Card */}
+      <div className="card" style={{ marginBottom: 16, padding: "18px 20px" }}>
+        <div style={{ display: "flex", gap: 16, marginBottom: 12, alignItems: "flex-start" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span className="lbl" style={{ fontWeight: 600 }}>Task Objective / Prompt (Tiếng Việt hoặc English)</span>
+              <span className="muted small">Max Steps: {maxSteps}</span>
+            </div>
+            <textarea
+              rows={3}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Nhập nhiệm vụ để AI tự động thực hiện từ A - Z..."
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, resize: "vertical" }}
+            />
+          </div>
+        </div>
+
+        {/* Quick Preset Chips */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          <span className="muted small" style={{ fontWeight: 500 }}>Quick Presets:</span>
+          {presets.map((p, i) => (
+            <button
+              key={i}
+              className="btn-ghost btn-sm"
+              style={{ fontSize: "11px", padding: "3px 8px" }}
+              onClick={() => setPrompt(p.prompt)}
+              title={p.desc}
+            >
+              {p.title}
+            </button>
+          ))}
+        </div>
+
+        {/* Profile and Execution Controls */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border, #2a2a2a)", paddingTop: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <label style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="lbl" style={{ margin: 0, whiteSpace: "nowrap" }}>Target Profile:</span>
+              <select
+                value={profileId}
+                onChange={(e) => setProfileId(e.target.value)}
+                style={{ padding: "6px 12px", borderRadius: 6, background: "var(--card-bg, #1a1d26)", color: "var(--fg, #fff)", border: "1px solid var(--border, #333)" }}
+              >
+                <option value="">✨ Auto-Generate Fresh Profile (Random Fingerprint)</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name || p.id.slice(0, 8)} ({p.folder || "All"})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={{ margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
+              <span className="lbl" style={{ margin: 0 }}>Steps limit:</span>
+              <input
+                type="number"
+                value={maxSteps}
+                onChange={(e) => setMaxSteps(parseInt(e.target.value, 10) || 35)}
+                min={5}
+                max={100}
+                style={{ width: 60, padding: "5px 8px" }}
+              />
+            </label>
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            {running ? (
+              <button className="btn-ghost danger" onClick={stopAgent}>
+                <Icon.Stop /> Stop Agent
+              </button>
+            ) : (
+              <button className="btn-primary" onClick={startAgent}>
+                <Icon.Play /> Launch Autonomous AI Agent
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Execution Live Dashboard (2 Columns) */}
+      <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 16, alignItems: "start" }}>
+        
+        {/* Left Column: Live Screen & Output */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Live Screen Card */}
+          <div className="card" style={{ padding: "16px", borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: "14px", fontWeight: 600 }}>Live Screen View</span>
+                {currentUrl && (
+                  <span className="mono small muted" style={{ fontSize: "11px", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    🔗 {currentUrl}
+                  </span>
+                )}
+              </div>
+              <span className={`status-pill ${running ? "status-active" : ""}`} style={{ fontSize: "10px" }}>
+                {status === "thinking" ? "🧠 Thinking" : status === "executing" ? "⚡ Executing" : status.toUpperCase()}
+              </span>
+            </div>
+
+            <div style={{
+              width: "100%",
+              aspectRatio: "16/9",
+              background: "#08090d",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.06)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+              position: "relative",
+            }}>
+              {screenshot ? (
+                <img
+                  src={screenshot}
+                  alt="Live Browser Screenshot"
+                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                />
+              ) : (
+                <div style={{ textAlign: "center", color: "var(--muted, #666)", padding: "20px" }}>
+                  <div style={{ fontSize: "36px", marginBottom: 8 }}>🖥️</div>
+                  <p style={{ margin: 0, fontSize: "13px" }}>
+                    {running ? "Capturing live browser screen..." : "Start an AI task to view live browser stream."}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Result Card */}
+          {result && (
+            <div className="card" style={{
+              padding: "16px 20px",
+              borderRadius: 12,
+              border: result.success ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid rgba(239, 68, 68, 0.4)",
+              background: result.success ? "rgba(16, 185, 129, 0.06)" : "rgba(239, 68, 68, 0.06)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <strong style={{ color: result.success ? "#10b981" : "#ef4444", fontSize: "14px" }}>
+                  {result.success ? "🎉 Task Completed Successfully" : "⚠️ Task Finished with Notice"}
+                </strong>
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={async () => {
+                    await clip.write(result.result);
+                    toast.ok("Result copied to clipboard");
+                  }}
+                >
+                  <IconCopy /> Copy Result
+                </button>
+              </div>
+              <div style={{
+                padding: "10px 12px",
+                background: "rgba(0,0,0,0.3)",
+                borderRadius: 6,
+                fontFamily: "monospace",
+                fontSize: "13px",
+                color: "#fff",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-all",
+              }}>
+                {result.result}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right Column: AI Brain & Live Logs */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* AI Brain Card */}
+          <div className="card" style={{ padding: "16px 18px", borderRadius: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <strong style={{ fontSize: "14px" }}>🧠 AI Reasoning & Action</strong>
+              <span className="status-pill status-active" style={{ fontSize: "11px", padding: "1px 8px" }}>
+                Step {currentStep} / {totalSteps}
+              </span>
+            </div>
+
+            {/* Thought Box */}
+            <div style={{
+              padding: "12px 14px",
+              background: "rgba(167, 139, 250, 0.08)",
+              border: "1px solid rgba(167, 139, 250, 0.2)",
+              borderRadius: 8,
+              marginBottom: 12,
+            }}>
+              <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: 700, color: "#a78bfa", display: "block", marginBottom: 4 }}>
+                AI Thoughts (Suy nghĩ)
+              </span>
+              <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.45, color: "var(--fg, #fff)" }}>
+                {currentThought || (running ? "Analyzing current page state..." : "Waiting for task launch...")}
+              </p>
+            </div>
+
+            {/* Action Box */}
+            {currentAction && (
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 12px",
+                background: "rgba(0,0,0,0.25)",
+                borderRadius: 8,
+                border: "1px solid var(--border, #2a2a2a)",
+              }}>
+                <span className="status-pill status-active" style={{ fontSize: "11px", textTransform: "uppercase" }}>
+                  ⚡ {currentAction}
+                </span>
+                <div style={{ flex: 1, minWidth: 0, fontSize: "12px", color: "var(--muted, #888)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {currentSelector && <span style={{ color: "#60a5fa" }}>Target: {currentSelector} </span>}
+                  {currentValue && <span>Value: "{currentValue}"</span>}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Activity Console Card */}
+          <div className="card" style={{ padding: "14px 16px", borderRadius: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <strong style={{ fontSize: "13px" }}>Activity Log Stream</strong>
+              <button className="btn-ghost btn-sm" onClick={() => setLogs([])} style={{ fontSize: "10px", padding: "1px 6px" }}>
+                Clear
+              </button>
+            </div>
+
+            <div style={{
+              height: 200,
+              background: "#08090d",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.06)",
+              padding: "10px 12px",
+              fontFamily: "monospace",
+              fontSize: "11px",
+              color: "var(--muted, #888)",
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}>
+              {logs.length === 0 ? (
+                <span style={{ opacity: 0.5 }}>Logs will appear here once the agent starts...</span>
+              ) : (
+                logs.map((l, i) => (
+                  <div key={i} style={{ color: l.includes("ERROR") ? "#ef4444" : l.includes("🚀") || l.includes("🎯") ? "#10b981" : "inherit" }}>
+                    {l}
+                  </div>
+                ))
+              )}
+              <div ref={logsEndRef} />
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
   );
 }
 
