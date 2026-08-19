@@ -362,17 +362,26 @@ fn ai_agent_start(app: tauri::AppHandle, config: AiAgentConfig) -> Result<(), St
     let token = api::long_lived_token(&secret).unwrap_or_default();
     let launcher_url = format!("http://127.0.0.1:{port}");
 
-    // Resolve project root
-    let agent_script = std::env::current_dir()
-        .map_err(|e| e.to_string())?
-        .join("agent")
-        .join("agent_runner.mjs");
+    // Resolve project root and agent script
+    let mut project_root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let mut agent_script = project_root.join("agent").join("agent_runner.mjs");
+
+    if !agent_script.exists() {
+        if let Some(parent) = project_root.parent() {
+            let alt = parent.join("agent").join("agent_runner.mjs");
+            if alt.exists() {
+                agent_script = alt;
+                project_root = parent.to_path_buf();
+            }
+        }
+    }
 
     if !agent_script.exists() {
         return Err(format!("Agent runner script not found at {}", agent_script.display()));
     }
 
     let mut cmd = Command::new("node");
+    cmd.current_dir(&project_root);
     cmd.arg(&agent_script);
     if let Some(pid) = config.profile_id {
         if !pid.is_empty() {
