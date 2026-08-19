@@ -325,12 +325,23 @@ async function main() {
   // 1. Tạo profile nếu chưa có
   if (!profileId) {
     emitEvent({ type: "log", message: "Đang sinh ngẫu nhiên Fingerprint Profile..." });
-    const profileRes = await axios.post(`${config.launcherUrl}/profiles`, {
-      name: `AI-Agent-${Date.now().toString().slice(-4)}`,
-      notes: `Tác vụ AI: ${config.prompt.slice(0, 50)}`,
-    }, { headers });
-    profileId = profileRes.data.id;
-    emitEvent({ type: "log", message: `Đã tạo Profile ID: ${profileId}` });
+    try {
+      const fpRes = await axios.get(`${config.launcherUrl}/fingerprints/new`, { headers });
+      const profileRes = await axios.post(`${config.launcherUrl}/profiles`, {
+        name: `AI-Agent-${Date.now().toString().slice(-4)}`,
+        notes: `Tác vụ AI: ${config.prompt.slice(0, 50)}`,
+        fingerprint: fpRes.data.fingerprint,
+      }, { headers });
+      profileId = profileRes.data.id;
+      emitEvent({ type: "log", message: `Đã tạo Profile ID: ${profileId}` });
+    } catch (createErr) {
+      emitEvent({ type: "log", message: `Thử tạo temporary profile...` });
+      const tempRes = await axios.post(`${config.launcherUrl}/profiles/temporary`, {
+        name: `AI-Agent-${Date.now().toString().slice(-4)}`,
+      }, { headers });
+      profileId = tempRes.data.id;
+      emitEvent({ type: "log", message: `Đã tạo Profile ID: ${profileId}` });
+    }
   }
 
   // 2. Khởi chạy Profile
