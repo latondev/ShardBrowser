@@ -2126,23 +2126,81 @@ function InlineEditor({
             </div>
           </label>
 
-          {f.extension_mode === "custom" && (
-            <div style={{
-              background: "rgba(0,0,0,0.25)",
-              border: "1px solid var(--border, #2a2a2a)",
-              borderRadius: 8,
-              padding: "6px",
-              maxHeight: 140,
-              overflowY: "auto",
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              marginBottom: 8,
-            }}>
-              {extList.length === 0 ? (
-                <span className="muted small" style={{ padding: "4px" }}>No extensions found in Library.</span>
-              ) : (
-                extList.map((ext) => {
+          {/* Extension list preview based on mode */}
+          <div style={{
+            background: "rgba(0,0,0,0.25)",
+            border: "1px solid var(--border, #2a2a2a)",
+            borderRadius: 8,
+            padding: "8px",
+            maxHeight: 150,
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            marginBottom: 8,
+          }}>
+            {extList.length === 0 ? (
+              <span className="muted small" style={{ padding: "4px" }}>
+                No extensions found in Library. Add extensions in the 🧩 Extensions tab.
+              </span>
+            ) : f.extension_mode === "none" ? (
+              <div style={{ padding: "8px 6px", textAlign: "center", color: "var(--muted, #888)", fontSize: "12px" }}>
+                ✕ All extensions disabled for this profile.
+              </div>
+            ) : f.extension_mode === "all" ? (
+              <>
+                <div className="muted small" style={{ fontSize: "11px", marginBottom: 2, padding: "0 2px" }}>
+                  Active extensions from Library ({extList.filter(e => e.enabled).length}/{extList.length}):
+                </div>
+                {extList.map((ext) => (
+                  <div
+                    key={ext.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "5px 8px",
+                      background: ext.enabled ? "rgba(16, 185, 129, 0.08)" : "rgba(255,255,255,0.02)",
+                      border: ext.enabled ? "1px solid rgba(16, 185, 129, 0.2)" : "1px solid rgba(255,255,255,0.04)",
+                      borderRadius: 6,
+                      opacity: ext.enabled ? 1 : 0.5,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+                      <div style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 4,
+                        overflow: "hidden",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: "rgba(255,255,255,0.05)",
+                        fontSize: "12px",
+                        flexShrink: 0
+                      }}>
+                        {ext.icon_base64 ? (
+                          <img src={ext.icon_base64} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                        ) : "🧩"}
+                      </div>
+                      <span style={{ fontSize: "12px", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {ext.name}
+                      </span>
+                      <span className="muted" style={{ fontSize: "10px" }}>v{ext.version}</span>
+                    </div>
+                    <span className={`status-pill ${ext.enabled ? "status-active" : ""}`} style={{ fontSize: "10px", padding: "1px 5px" }}>
+                      {ext.enabled ? "Will Load" : "Library Disabled"}
+                    </span>
+                  </div>
+                ))}
+              </>
+            ) : (
+              /* Custom pick mode */
+              <>
+                <div className="muted small" style={{ fontSize: "11px", marginBottom: 2, padding: "0 2px" }}>
+                  Check extensions to load ({f.extensions.length}/{extList.length} selected):
+                </div>
+                {extList.map((ext) => {
                   const isChecked = f.extensions.includes(ext.id);
                   return (
                     <div
@@ -2197,10 +2255,10 @@ function InlineEditor({
                       </span>
                     </div>
                   );
-                })
-              )}
-            </div>
-          )}
+                })}
+              </>
+            )}
+          </div>
 
           <label>
             <span className="lbl">Notes</span>
