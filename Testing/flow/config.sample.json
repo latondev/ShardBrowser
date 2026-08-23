@@ -1,0 +1,32 @@
+{
+  "url": "https://labs.google/fx/tools/flow",
+  "mode": "text-to-video",
+  "aspectRatio": "16:9",
+  "outputCount": 2,
+  "startIndex": 1,
+  "prompt": "A futuristic neon cyberpunk city with flying cars at sunset, 4k ultra realistic",
+  "prompts": [
+    "A futuristic neon cyberpunk city with flying cars at sunset, 4k ultra realistic",
+    "A cinematic drone shot flying over majestic green mountains and waterfalls"
+  ],
+  "delayRange": [15, 25],
+  "download": {
+    "enabled": true,
+    "folder": "./downloads/veo-folder-1",
+    "quality": "1080p",
+    "autoRename": true
+  },
+  "options": {
+    "autoAddCharacter": false,
+    "dropdown": "option1",
+    "checkbox": true
+  },
+  "timeout": 60,
+  "extensionPath": "F:\\ToolAllvideo\\Extension\\flow-automation-auto-flow",
+  "profileId": "",
+  "userDataDir": "",
+  "keepOpen": true,
+  "shardBrowserPath": "",
+  "debugPort": 9222,
+  "logLevel": "info"
+}

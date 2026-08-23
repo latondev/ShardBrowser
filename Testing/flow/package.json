@@ -1,0 +1,33 @@
+{
+  "name": "flow",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.ts",
+    "inspect-ext": "tsx src/inspect-extensions.ts",
+    "hybrid": "tsx src/hybrid-flow.ts",
+    "hybrid:run": "tsx src/hybrid-flow.ts --run",
+    "full-auto": "tsx src/full-auto.ts",
+    "full-auto:all": "tsx src/full-auto.ts --all --auto-close"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "commander": "^15.0.0",
+    "puppeteer": "^25.8.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "winston": "^3.19.0"
+  }
+}
