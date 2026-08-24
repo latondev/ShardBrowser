@@ -272,12 +272,14 @@ pub fn save_raw(stored: &mut StoredProfile) -> Result<()> {
 pub fn delete(id: &str) -> Result<()> {
     let path = path_for(id)?;
     if path.exists() {
-        fs::remove_file(path)?;
+        let _ = fs::remove_file(&path);
     }
-    // Also wipe per-profile user-data-dir.
-    let udd = store::user_data_root()?.join(id);
-    if udd.exists() {
-        let _ = fs::remove_dir_all(udd);
+    // Also wipe per-profile user-data-dir if possible.
+    if let Ok(root) = store::user_data_root() {
+        let udd = root.join(id);
+        if udd.exists() {
+            let _ = fs::remove_dir_all(udd);
+        }
     }
     Ok(())
 }

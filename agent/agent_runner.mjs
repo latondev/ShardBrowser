@@ -16,7 +16,7 @@ function parseArgs() {
     prompt: "Tự động đăng ký tài khoản GitHub bằng email tạm thời và bật 2FA.",
     baseUrl: "https://api.xkiro.com/v1",
     apiKey: "sk-xt-dfa9623373697bc9c6d720f7b974e459b54189998b56de42",
-    model: "qwen/qwen3.8-max",
+    model: "stealth/ox-alpha-free",
     password: `ShardX@2026!Pass#${Date.now().toString().slice(-4)}`,
     maxSteps: 35,
     launcherUrl: "http://127.0.0.1:40325",

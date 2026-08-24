@@ -610,7 +610,6 @@ type Theme = "dark" | "light";
 
 export default function App() {
   const [section, setSection] = useState<Section>("browsers");
-  const [aiProfileTarget, setAiProfileTarget] = useState<string>("");
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem("shardx-theme") as Theme) || "dark",
   );
@@ -619,10 +618,6 @@ export default function App() {
     localStorage.setItem("shardx-theme", theme);
   }, [theme]);
 
-  const handleOpenAi = (profileId: string) => {
-    setAiProfileTarget(profileId);
-    setSection("ai_agent");
-  };
 
   return (
     <>
@@ -675,15 +670,10 @@ export default function App() {
             onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
           />
           <main className="main">
-            {section === "browsers" && <BrowsersView onOpenAi={handleOpenAi} />}
+            {section === "browsers" && <BrowsersView />}
             {section === "proxies" && <ProxiesView />}
             {section === "proxyshard" && <ProxyShardView />}
-            {section === "ai_agent" && (
-              <AiAgentView
-                initialProfileId={aiProfileTarget}
-                onClearInitialProfile={() => setAiProfileTarget("")}
-              />
-            )}
+            {section === "ai_agent" && <AiAgentView />}
             {section === "fingerprints" && <FingerprintsView />}
             {section === "extensions" && <ExtensionsView />}
             {section === "settings" && <SettingsView />}
@@ -1044,9 +1034,16 @@ function useStoreChanged(onChange: () => void) {
       if (disposed) fn();
       else un = fn;
     });
+
+    // Tự động kiểm tra và đồng bộ realtime định kỳ 2.5s khi có script/API tạo profile từ bên ngoài
+    const pollInterval = setInterval(() => {
+      if (!disposed) cb.current();
+    }, 2500);
+
     return () => {
       disposed = true;
       if (timer) clearTimeout(timer);
+      clearInterval(pollInterval);
       un?.();
     };
   }, []);
@@ -1054,7 +1051,7 @@ function useStoreChanged(onChange: () => void) {
 
 // ---- Browsers view ----
 
-function BrowsersView({ onOpenAi }: { onOpenAi?: (id: string) => void } = {}) {
+function BrowsersView() {
   const [profiles, setProfiles] = useState<ProfileMeta[]>([]);
   const [proxies, setProxies] = useState<ProxyEntry[]>([]);
   const [search, setSearch] = useState("");
@@ -1248,8 +1245,17 @@ function BrowsersView({ onOpenAi }: { onOpenAi?: (id: string) => void } = {}) {
 
   const remove = async (id: string) => {
     if ((await confirmModal({ title: "Delete profile", message: "Delete this profile? Its user-data dir is wiped too.", danger: true })) !== true) return;
-    await invoke("profile_delete", { id });
-    reload();
+    try {
+      if (running[id]) {
+        try { await invoke("process_kill", { profileId: id }); } catch {}
+      }
+      await invoke("profile_delete", { id });
+      toast.ok("Profile deleted");
+      reload();
+    } catch (e) {
+      toast.err("Error deleting profile: " + String(e));
+      reload();
+    }
   };
 
   const cloneProfile = async (id: string) => {
@@ -1293,7 +1299,6 @@ function BrowsersView({ onOpenAi }: { onOpenAi?: (id: string) => void } = {}) {
   // Per-profile action menu shared by right-click and ⋮ button.
   const profileMenu = (p: ProfileMeta) => [
     { label: running[p.id] ? "Stop" : "Launch", onClick: () => startStop(p) },
-    { label: "🤖 Run AI Agent…", onClick: () => onOpenAi?.(p.id) },
     { label: "Edit", onClick: () => expand(p.id) },
     { label: "Clone", onClick: () => cloneProfile(p.id) },
     { label: p.pinned ? "Unpin" : "Pin to top", onClick: () => togglePin(p) },
@@ -1763,7 +1768,6 @@ function BrowsersView({ onOpenAi }: { onOpenAi?: (id: string) => void } = {}) {
                     <Icon.Pin />
                   </button>
                   <button className="icon-btn" onClick={() => expand(p.id)} title="Edit"><Icon.Edit /></button>
-                  <button className="icon-btn" onClick={() => onOpenAi?.(p.id)} title="Run Autonomous AI Agent"><IconBot /></button>
                   <button className="icon-btn" onClick={() => cloneProfile(p.id)} title="Clone"><Icon.Clone /></button>
                   <button className="icon-btn danger" onClick={() => remove(p.id)} title="Delete"><Icon.Trash /></button>
                   <button
@@ -4942,7 +4946,7 @@ function AiAgentView({
 }: {
   initialProfileId?: string;
   onClearInitialProfile?: () => void;
-}) {
+} = {}) {
   const [profiles, setProfiles] = useState<ProfileMeta[]>([]);
   const [profileId, setProfileId] = useState<string>(initialProfileId || "");
   const [prompt, setPrompt] = useState<string>(
@@ -4955,7 +4959,7 @@ function AiAgentView({
     () => localStorage.getItem("shardx_ai_api_key") || "sk-xt-dfa9623373697bc9c6d720f7b974e459b54189998b56de42"
   );
   const [model, setModel] = useState<string>(
-    () => localStorage.getItem("shardx_ai_model") || "qwen/qwen3.8-max"
+    () => localStorage.getItem("shardx_ai_model") || "stealth/ox-alpha-free"
   );
   const [maxSteps, setMaxSteps] = useState<number>(35);
   const [showSettings, setShowSettings] = useState<boolean>(false);
@@ -5159,7 +5163,7 @@ function AiAgentView({
             </label>
             <label>
               <span className="lbl">Vision Model</span>
-              <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="qwen/qwen3.8-max" />
+              <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="stealth/ox-alpha-free" />
             </label>
           </div>
         </div>
