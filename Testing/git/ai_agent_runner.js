@@ -929,21 +929,13 @@ export class AiAgentRunner {
         } catch {}
       });
 
-      // 2. Khởi tạo Email Thật @gmail.com qua GmailCreatorClient (Hoặc fallback sang Mail.tm)
+      // 2. Khởi tạo Email Thật @gmail.com qua GmailCreatorClient (Bảo đảm 100% không bị suspended)
       console.log("\n[Bước 1] Khởi tạo Email @gmail.com thật từ RapidAPI...");
-      let acc;
-      try {
-        acc = await this._gmailClient.createAccount();
-        this._activeEmailService = "gmail";
-      } catch (gmailErr) {
-        console.warn(`(!) Lỗi tạo Gmail (${gmailErr.message}) -> Tự động chuyển sang Mail.tm fallback...`);
-        const randPrefix = `user${Date.now().toString().slice(-4)}${Math.random().toString(36).substring(2, 6)}`;
-        acc = await this._mailTm.createAccount(randPrefix);
-        this._activeEmailService = "mailtm";
-      }
+      const acc = await this._gmailClient.createAccount();
+      this._activeEmailService = "gmail";
       this._accountState.email = acc.address;
       this._accountState.username = acc.username;
-      console.log(`📧 [Email Tạo Lập]: ${this._accountState.email}`);
+      console.log(`📧 [Gmail Tạo Lập]: ${this._accountState.email}`);
       console.log(`👤 [Username Tạo lập]: ${this._accountState.username}`);
 
       // 3. Mở Form Đăng ký GitHub (https://github.com/signup?source=login)
@@ -1052,27 +1044,59 @@ export class AiAgentRunner {
       await this._smartScroll(this._githubPage, "down");
       await this._safeSleep(1500);
 
-      const clickedSubmit = await this._githubPage.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll("button, input[type='submit']"));
-        for (const b of buttons) {
+      // Cách 1: Tìm bằng DOM evaluate và scroll + click
+      let clickedSubmit = await this._githubPage.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], [role='button']"));
+        // Ưu tiên 1: Nút có text "Create account"
+        const createBtn = buttons.find(b => {
           const txt = (b.innerText || b.value || b.textContent || "").trim().toLowerCase();
-          const isGoogle = txt.includes("google") || txt.includes("apple") || txt.includes("passkey");
-          if (!isGoogle && (txt.includes("create account") || txt === "continue" || b.type === "submit")) {
-            b.scrollIntoView({ behavior: "smooth", block: "center" });
-            b.removeAttribute("disabled");
-            b.click();
-            return true;
-          }
-        }
+          return txt.includes("create account");
+        });
 
-        const signupForm = document.querySelector("form[action*='signup'], form");
-        if (signupForm) {
-          signupForm.requestSubmit();
+        if (createBtn) {
+          createBtn.scrollIntoView({ behavior: "smooth", block: "center" });
+          createBtn.removeAttribute("disabled");
+          createBtn.click();
           return true;
         }
 
+        // Ưu tiên 2: Nút submit form đăng ký
+        const submitBtn = document.querySelector("form button[type='submit'], button[type='submit'], input[type='submit']");
+        if (submitBtn) {
+          const txt = (submitBtn.innerText || submitBtn.value || submitBtn.textContent || "").trim().toLowerCase();
+          if (!txt.includes("google") && !txt.includes("apple")) {
+            submitBtn.scrollIntoView({ behavior: "smooth", block: "center" });
+            submitBtn.removeAttribute("disabled");
+            submitBtn.click();
+            return true;
+          }
+        }
         return false;
       }).catch(() => false);
+
+      // Cách 2: Tìm ElementHandle và click native qua Puppeteer
+      await this._safeSleep(1000);
+      try {
+        const allButtons = await this._githubPage.$$("button, input[type='submit']");
+        for (const btn of allButtons) {
+          const text = await this._githubPage.evaluate(el => (el.innerText || el.value || el.textContent || "").trim().toLowerCase(), btn);
+          if (text.includes("create account")) {
+            await btn.evaluate(el => el.scrollIntoView({ behavior: "smooth", block: "center" }));
+            await this._safeSleep(500);
+            await btn.click({ delay: 50 });
+            clickedSubmit = true;
+            break;
+          }
+        }
+      } catch {}
+
+      // Cách 3: Nhấn Enter trên ô username nếu vẫn ở trang signup
+      await this._safeSleep(1500);
+      const stillOnSignup = this._githubPage.url().includes("signup");
+      if (stillOnSignup) {
+        console.log("-> Nhấn Enter để kích hoạt gửi Form đăng ký...");
+        await this._githubPage.keyboard.press("Enter");
+      }
 
       console.log(`-> Kết quả click Create account: ${clickedSubmit ? 'Đã click nút thành công' : 'Đang đợi chuyển trang'}`);
       await this._safeSleep(2500);

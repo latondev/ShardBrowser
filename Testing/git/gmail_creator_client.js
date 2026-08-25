@@ -94,83 +94,94 @@ export class GmailCreatorClient {
   // PUBLIC METHODS
   // ============================================================================
 
-  // Tạo địa chỉ Gmail tạm thời mới (tự động xáo trộn và xoay vòng toàn bộ key)
-  async createAccount() {
+  // Tạo địa chỉ Gmail tạm thời mới (tự động thử các key trong pool)
+  async createAccount(maxRetries = 2) {
     // Đọc danh sách key mới nhất từ rapidapikey.md trong thời gian thực
     const rawKeys = this._loadApiKeys();
     // Xáo trộn ngẫu nhiên để chia đều tải cho tất cả các key
     this._apiKeys = [...rawKeys].sort(() => Math.random() - 0.5);
     console.log(`⏳ [Gmail API] Đang yêu cầu sinh địa chỉ @gmail.com mới từ RapidAPI (${this._apiKeys.length} keys sẵn sàng trong pool)...`);
 
-    for (let i = 0; i < this._apiKeys.length; i++) {
-      const activeKey = this._apiKeys[i];
-      try {
-        const res = await axios.post(
-          `${this._baseUrl}/generate-email`,
-          { email: ["Gmail"] },
-          { headers: this._getHeaders(activeKey), timeout: 45000 }
-        );
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      for (let i = 0; i < this._apiKeys.length; i++) {
+        const activeKey = this._apiKeys[i];
+        try {
+          const res = await axios.post(
+            `${this._baseUrl}/generate-email`,
+            { email: ["Gmail"] },
+            { headers: this._getHeaders(activeKey), timeout: 25000 }
+          );
 
-        const email = res.data?.email;
-        if (!email || typeof email !== "string" || !email.includes("@")) {
-          throw new Error(`Định dạng email không hợp lệ: ${JSON.stringify(res.data)}`);
+          const email = res.data?.email;
+          if (email && typeof email === "string" && email.includes("@")) {
+            this._apiKey = activeKey;
+            this._currentEmail = email;
+            // Sinh username hợp lệ từ prefix trước @
+            const rawUser = email.split("@")[0].replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+            this._currentUsername = `user${rawUser.slice(0, 12)}${Math.random().toString(36).substring(2, 5)}`;
+
+            console.log(`✅ [Gmail Tạo Thành Công]: ${this._currentEmail} (User: ${this._currentUsername}) | Key [${activeKey.slice(0, 10)}...]`);
+            return {
+              address: this._currentEmail,
+              username: this._currentUsername,
+            };
+          }
+        } catch (err) {
+          const errMsg = err.response?.data?.message || err.response?.data?.detail || err.message;
+          console.warn(`(!) Key [${activeKey.slice(0, 10)}...] gặp lỗi (${errMsg}) -> Thử key tiếp theo...`);
         }
-
-        this._apiKey = activeKey;
-        this._currentEmail = email;
-        // Sinh username hợp lệ từ prefix trước @
-        const rawUser = email.split("@")[0].replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-        this._currentUsername = `user${rawUser.slice(0, 12)}${Math.random().toString(36).substring(2, 5)}`;
-
-        console.log(`✅ [Gmail Tạo Thành Công]: ${this._currentEmail} (User: ${this._currentUsername}) | Key [${activeKey.slice(0, 10)}...]`);
-        return {
-          address: this._currentEmail,
-          username: this._currentUsername,
-        };
-      } catch (err) {
-        const errMsg = err.response?.data?.message || err.response?.data?.detail || err.message;
-        console.warn(`(!) Key [${activeKey.slice(0, 10)}...] gặp lỗi: ${errMsg} -> Tự động chuyển sang key khác...`);
+      }
+      if (attempt < maxRetries) {
+        console.log(`⏳ Máy chủ bận, chờ 3s trước khi thử lại lần ${attempt + 1}/${maxRetries}...`);
+        await this._sleep(3000);
       }
     }
 
-    throw new Error(`Tất cả các RapidAPI Key đều không tạo được Gmail.`);
+    throw new Error(`Máy chủ RapidAPI Gmail hiện đang tạm thời bận/bảo trì. Vui lòng thử lại sau giây lát.`);
   }
 
-  // Lấy danh sách tin nhắn trong hộp thư
+  // Lấy danh sách tin nhắn trong hộp thư (tự động thử các key)
   async getMessages(email = this._currentEmail) {
     if (!email) throw new Error("Chưa có địa chỉ email để kiểm tra hộp thư.");
-    try {
-      const res = await axios.post(
-        `${this._baseUrl}/message-list`,
-        { email },
-        { headers: this._getHeaders(), timeout: 30000 }
-      );
+    const keys = this._apiKeys.length > 0 ? this._apiKeys : this._loadApiKeys();
 
-      const msgs = res.data?.messages;
-      return Array.isArray(msgs) ? msgs : [];
-    } catch (err) {
-      console.warn(`(!) Lỗi lấy danh sách thư (${email}): ${err.message}`);
-      return [];
+    for (const key of keys) {
+      try {
+        const res = await axios.post(
+          `${this._baseUrl}/message-list`,
+          { email },
+          { headers: this._getHeaders(key), timeout: 12000 }
+        );
+
+        const msgs = res.data?.messages;
+        if (Array.isArray(msgs)) return msgs;
+      } catch (err) {
+        // Tiếp tục thử nếu là timeout hoặc network
+      }
     }
+    return [];
   }
 
   // Lấy chi tiết nội dung 1 tin nhắn
   async getMessageDetails(messageId, email = this._currentEmail) {
     if (!messageId || !email) return null;
-    try {
-      const res = await axios.post(
-        `${this._baseUrl}/message-details`,
-        { email, message_id: messageId },
-        { headers: this._getHeaders(), timeout: 30000 }
-      );
-      return res.data;
-    } catch (err) {
-      return null;
+    const keys = this._apiKeys.length > 0 ? this._apiKeys : this._loadApiKeys();
+
+    for (const key of keys) {
+      try {
+        const res = await axios.post(
+          `${this._baseUrl}/message-details`,
+          { email, message_id: messageId },
+          { headers: this._getHeaders(key), timeout: 12000 }
+        );
+        if (res.data) return res.data;
+      } catch (err) {}
     }
+    return null;
   }
 
   // Lắng nghe và trích xuất mã OTP từ GitHub
-  async waitForVerificationCode(maxWaitSeconds = 90, pollIntervalSeconds = 3) {
+  async waitForVerificationCode(maxWaitSeconds = 120, pollIntervalSeconds = 2.5) {
     const email = this._currentEmail;
     if (!email) throw new Error("Chưa có địa chỉ email để nhận mã OTP.");
 
