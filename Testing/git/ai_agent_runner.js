@@ -778,6 +778,9 @@ export class AiAgentRunner {
     try {
       console.log(`[ShardX] 🚀 Đang kết nối ShardX Launcher tại ${this._launcherApiUrl}...`);
 
+      // BƯỚC 0: TỰ ĐỘNG XÓA SẠCH TOÀN BỘ PROFILE CŨ TRONG SHARDBROWSER
+      await this._deleteAllOldProfiles();
+
       // BƯỚC 1: LẤY PROXY KÈM ĐẦY ĐỦ USERNAME & PASSWORD TỪ SHARDBROWSER
       let chosenProxy = null;
       try {
@@ -849,13 +852,31 @@ export class AiAgentRunner {
     throw new Error("Không tìm thấy kết nối trình duyệt. Hãy bật ShardX Launcher hoặc khởi chạy Chrome với --remote-debugging-port=9222.");
   }
 
+  // Xóa toàn bộ profile cũ trong ShardBrowser
+  async _deleteAllOldProfiles() {
+    try {
+      const { data: profiles } = await axios.get(`${this._launcherApiUrl}/profiles`, { headers: this._headers, timeout: 5000 });
+      if (Array.isArray(profiles) && profiles.length > 0) {
+        console.log(`🧹 [Profile Cleanup] Phát hiện ${profiles.length} profiles cũ, đang xóa sạch...`);
+        for (const prof of profiles) {
+          try {
+            await axios.post(`${this._launcherApiUrl}/profiles/${prof.id}/stop`, {}, { headers: this._headers, timeout: 3000 }).catch(() => {});
+            await axios.delete(`${this._launcherApiUrl}/profiles/${prof.id}`, { headers: this._headers, timeout: 3000 }).catch(() => {});
+          } catch {}
+        }
+        console.log(`✅ [Profile Cleanup] Đã xóa sạch toàn bộ profiles cũ.`);
+      }
+    } catch {}
+  }
+
   // Dọn dẹp tài nguyên
   async _cleanup() {
     console.log("\n🧹 [Cleanup] Đang dọn dẹp phiên kiểm thử...");
     try {
       if (this._profileId && this._isCreatedProfile) {
-        await axios.post(`${this._launcherApiUrl}/profiles/${this._profileId}/stop`, {}, { headers: this._headers }).catch(() => {});
-        console.log(`-> Đã dừng ShardX Profile ID: ${this._profileId}`);
+        await axios.post(`${this._launcherApiUrl}/profiles/${this._profileId}/stop`, {}, { headers: this._headers, timeout: 5000 }).catch(() => {});
+        await axios.delete(`${this._launcherApiUrl}/profiles/${this._profileId}`, { headers: this._headers, timeout: 5000 }).catch(() => {});
+        console.log(`-> Đã dừng và xóa Profile ID: ${this._profileId}`);
       }
       if (this._browser) {
         if (this._ownsBrowser) {
