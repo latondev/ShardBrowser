@@ -115,9 +115,15 @@ export class BatchRunner {
         const accTime = (Date.now() - accStart) / 1000;
         console.log(`\n🎉 [XONG TÀI KHOẢN #${index}]: ${accountEmail} | Thời gian: ${this._formatTime(accTime)}`);
       } catch (err) {
-        this._failedCount++;
         const accTime = (Date.now() - accStart) / 1000;
-        console.error(`\n❌ [LỖI TÀI KHOẢN #${index}]: ${err.message} | Thời gian: ${this._formatTime(accTime)}`);
+        if (err.message && err.message.includes("EMAIL_ALREADY_EXISTS")) {
+          console.warn(`\n🔄 [EMAIL ĐÃ TỒN TẠI]: Tự động bỏ qua lượt này và làm lại tài khoản #${index} mới từ đầu...`);
+          // Giảm index để lượt sau vẫn tạo bù cho tài khoản #index này
+          index--;
+        } else {
+          this._failedCount++;
+          console.error(`\n❌ [LỖI TÀI KHOẢN #${index}]: ${err.message} | Thời gian: ${this._formatTime(accTime)}`);
+        }
       } finally {
         this._currentRunner = null;
         this._history.push({

@@ -944,7 +944,7 @@ export class AiAgentRunner {
       this._githubPage.setDefaultNavigationTimeout(120000);
       this._githubPage.setDefaultTimeout(120000);
 
-      const maxRetries = 3;
+      const maxRetries = 10;
       let isFormReady = false;
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -1010,6 +1010,19 @@ export class AiAgentRunner {
       await this._humanType(this._githubPage, "#email, input[type='email'], input[name='user[email]'], input[autocomplete='email']", this._accountState.email, false);
       await this._safeSleep(1500);
 
+      // Kiểm tra ngay xem Email đã từng được tạo trên GitHub trước đó chưa
+      let isEmailTaken = await this._githubPage.evaluate(() => {
+        const text = document.body ? document.body.innerText : "";
+        return text.includes("already associated with an account") ||
+               text.includes("Email is invalid or already taken") ||
+               text.includes("associated with an account");
+      }).catch(() => false);
+
+      if (isEmailTaken) {
+        console.warn(`\n⚠️ [EMAIL ĐÃ TỒN TẠI]: Địa chỉ [${this._accountState.email}] đã được đăng ký tài khoản GitHub trước đó!`);
+        throw new Error(`EMAIL_ALREADY_EXISTS: Email [${this._accountState.email}] đã tồn tại trên GitHub.`);
+      }
+
       // 4.2 Điền Password
       console.log(`-> 2. Nhập Password: ${this._accountState.password}`);
       await this._githubPage.waitForSelector("#password, input[name='user[password]'], input[type='password']", { visible: true, timeout: 20000 });
@@ -1035,9 +1048,20 @@ export class AiAgentRunner {
         await this._safeSleep(1500);
       }
 
-      // 4.4 Chờ validation hoàn tất và Bấm nút "Create account"
+      // 4.4 Chờ validation hoàn tất và kiểm tra lại Email lần 2
       console.log("-> 4. Chờ 1.5s để GitHub kiểm tra tính hợp lệ của toàn bộ Form...");
       await this._safeSleep(1500);
+
+      const isEmailTakenLate = await this._githubPage.evaluate(() => {
+        const text = document.body ? document.body.innerText : "";
+        return text.includes("already associated with an account") ||
+               text.includes("Email is invalid or already taken");
+      }).catch(() => false);
+
+      if (isEmailTakenLate) {
+        console.warn(`\n⚠️ [EMAIL ĐÃ TỒN TẠI]: Địa chỉ [${this._accountState.email}] đã được đăng ký trước đó!`);
+        throw new Error(`EMAIL_ALREADY_EXISTS: Email [${this._accountState.email}] đã tồn tại trên GitHub.`);
+      }
 
       console.log("-> 5. Cuộn trang và bấm nút 'Create account' để gửi form...");
       await this._detectAndCloseOverlays(this._githubPage);
