@@ -1,0 +1,11 @@
+{
+  "name": "puppeteer-local-e2e",
+  "private": true,
+  "scripts": {
+    "test": "node e2e.test.js",
+    "mock-server": "node mock-server.js"
+  },
+  "dependencies": {
+    "puppeteer": "^24.10.0"
+  }
+}

@@ -1443,7 +1443,13 @@ function BrowsersView() {
   const saveDraft = async () => {
     if (!draft) return;
     try {
-      const fp = fingerprints.find((g) => g.id === draft.gpu_preset_id) ?? null;
+      let fp = fingerprints.find((g) => g.id === draft.gpu_preset_id) ?? null;
+      if (fp && (!fp.payload || Object.keys(fp.payload).length === 0)) {
+        try {
+          const full = await invoke<FingerprintEntry | null>("fingerprint_get", { id: fp.id });
+          if (full && full.payload) fp = full;
+        } catch {}
+      }
       const saved = await invoke<ProfileMeta>("profile_save", { payload: toStored(draft, fp) });
       await invoke("profile_bind_proxy", { profileId: saved.id, proxyId: draft.proxy_id });
       // A profile created while a folder tab is active should land in that
@@ -1935,8 +1941,14 @@ function InlineEditor({
 
   /// Pick GPU = full fingerprint snap; toStored carries lib.payload at save.
   const setGpu = async (id: string) => {
-    const fp = fingerprints.find((x) => x.id === id);
+    let fp = fingerprints.find((x) => x.id === id);
     if (!fp) return;
+    if (!fp.payload || Object.keys(fp.payload).length === 0) {
+      try {
+        const full = await invoke<FingerprintEntry | null>("fingerprint_get", { id });
+        if (full && full.payload) fp = full;
+      } catch {}
+    }
     const nav = fp.payload?.navigator ?? {};
     // Ask Rust for the same hw + platform_version triplet save uses.
     let picks: { hardware_concurrency?: number; device_memory?: number; platform_version?: string } = {};
@@ -2420,7 +2432,7 @@ function PortList({
 
 type CSOption<T> = { value: T; label: string };
 
-/// Themed dropdown replacing the native select inside the profile editor.
+/// Themed dropdown replacing the native select inside the profile editor with search and virtualized DOM.
 function CSSelect<T extends string | number>({
   value, options, onChange, placeholder,
 }: {
@@ -2430,28 +2442,41 @@ function CSSelect<T extends string | number>({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   // Body portal so ancestor overflow:hidden can't clip the menu.
   const [anchor, setAnchor] = useState<{ left: number; top: number; width: number; up: boolean } | null>(null);
 
+  const filtered = useMemo(() => {
+    if (!search.trim()) return options;
+    const q = search.toLowerCase();
+    return options.filter((o) => o.label.toLowerCase().includes(q));
+  }, [options, search]);
+
+  const MAX_RENDERED = 80;
+  const visible = useMemo(() => filtered.slice(0, MAX_RENDERED), [filtered]);
+
   const place = () => {
     const el = triggerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const menuH = Math.min(280, options.length * 38 + 10);
+    const menuH = 280;
     // Flip up if no room below.
     const up = r.bottom + menuH + 8 > window.innerHeight && r.top - menuH - 8 > 0;
     setAnchor({
       left: r.left,
       top: up ? r.top - menuH - 4 : r.bottom + 4,
-      width: r.width,
+      width: Math.max(r.width, 240),
       up,
     });
   };
 
   const toggle = () => {
-    if (!open) place();
+    if (!open) {
+      setSearch("");
+      place();
+    }
     setOpen((v) => !v);
   };
 
@@ -2492,19 +2517,43 @@ function CSSelect<T extends string | number>({
           ref={menuRef}
           className="cs-menu"
           role="listbox"
-          style={{ left: anchor.left, top: anchor.top, width: anchor.width }}
+          style={{ left: anchor.left, top: anchor.top, width: anchor.width, maxHeight: 300, display: "flex", flexDirection: "column" }}
         >
-          {options.map((o) => (
-            <div
-              key={String(o.value)}
-              role="option"
-              aria-selected={o.value === value}
-              className={`cs-opt ${o.value === value ? "active" : ""}`}
-              onClick={() => { onChange(o.value); setOpen(false); }}
-            >
-              {o.label}
+          {options.length > 15 && (
+            <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border, rgba(255,255,255,0.08))", position: "sticky", top: 0, background: "var(--card-bg, #1a1d26)", zIndex: 2 }}>
+              <input
+                autoFocus
+                placeholder="Search / filter..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: 4, background: "rgba(0,0,0,0.3)", border: "1px solid var(--border, #333)", color: "#fff" }}
+              />
             </div>
-          ))}
+          )}
+          <div style={{ overflowY: "auto", flex: 1 }}>
+            {visible.map((o) => (
+              <div
+                key={String(o.value)}
+                role="option"
+                aria-selected={o.value === value}
+                className={`cs-opt ${o.value === value ? "active" : ""}`}
+                onClick={() => { onChange(o.value); setOpen(false); }}
+              >
+                {o.label}
+              </div>
+            ))}
+            {filtered.length > MAX_RENDERED && (
+              <div className="muted small" style={{ padding: "8px 12px", textAlign: "center", fontSize: "11px" }}>
+                + {filtered.length - MAX_RENDERED} more results (type to search)
+              </div>
+            )}
+            {visible.length === 0 && (
+              <div className="muted small" style={{ padding: "12px", textAlign: "center" }}>
+                No matching options
+              </div>
+            )}
+          </div>
         </div>,
         document.body,
       )}
@@ -3420,6 +3469,7 @@ function ProxyEditor({ initial, onClose }: { initial: ProxyEntry; onClose: () =>
 function FingerprintsView() {
   const [items, setItems] = useState<FingerprintEntry[]>([]);
   const [importerOpen, setImporterOpen] = useState(false);
+  const [search, setSearch] = useState("");
 
   const reload = () =>
     invoke<FingerprintEntry[]>("fingerprint_list").then(setItems).catch((e) => toast.err(String(e)));
@@ -3461,9 +3511,9 @@ function FingerprintsView() {
 
   return (
     <section className="page">
-      <Topbar crumbs={["Library", "Fingerprints"]} search="" onSearch={() => {}} />
+      <Topbar crumbs={["Library", "Fingerprints"]} search={search} onSearch={setSearch} />
       <div className="page-title">
-        <h1>Fingerprint Library</h1>
+        <h1>Fingerprint Library ({items.length.toLocaleString()})</h1>
         <div className="page-actions">
           <button
             className="btn-ghost"
@@ -3489,7 +3539,7 @@ function FingerprintsView() {
       {items.length === 0 ? (
         <div className="empty">Library is empty — click "Import from file" or "Paste JSON".</div>
       ) : (
-        <LibraryGroups items={items} onUse={use} onRemove={remove} />
+        <LibraryGroups items={items} search={search} onUse={use} onRemove={remove} />
       )}
       {importerOpen && (
         <FingerprintImporter onClose={() => { setImporterOpen(false); reload(); }} />
@@ -3498,18 +3548,33 @@ function FingerprintsView() {
   );
 }
 
-/// Library entries grouped by OS (macOS → Windows → Linux → other).
+/// Library entries grouped by OS with search and per-group pagination.
 function LibraryGroups({
-  items, onUse, onRemove,
+  items, search, onUse, onRemove,
 }: {
   items: FingerprintEntry[];
+  search: string;
   onUse: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
+  const [pages, setPages] = useState<Record<string, number>>({});
+  const PAGE_SIZE = 24;
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return items;
+    const q = search.toLowerCase();
+    return items.filter(
+      (it) =>
+        it.label.toLowerCase().includes(q) ||
+        it.gpu.toLowerCase().includes(q) ||
+        it.id.toLowerCase().includes(q),
+    );
+  }, [items, search]);
+
   const groups = useMemo(() => {
-    const order = ["macOS", "Windows", "Linux"];
+    const order = ["Windows", "macOS", "Linux"];
     const buckets = new Map<string, FingerprintEntry[]>();
-    for (const it of items) {
+    for (const it of filtered) {
       const k = it.platform || "Other";
       if (!buckets.has(k)) buckets.set(k, []);
       buckets.get(k)!.push(it);
@@ -3518,40 +3583,74 @@ function LibraryGroups({
       ...order.filter((k) => buckets.has(k)).map((k) => [k, buckets.get(k)!] as const),
       ...[...buckets.keys()].filter((k) => !order.includes(k)).map((k) => [k, buckets.get(k)!] as const),
     ];
-  }, [items]);
+  }, [filtered]);
 
   return (
     <div className="lib-groups">
-      {groups.map(([platform, list]) => (
-        <div key={platform} className="lib-group">
-          <div className="lib-group-head">
-            <span className={`lib-group-dot lib-dot-${platform.toLowerCase()}`} />
-            <h3>{platform}</h3>
-            <span className="lib-group-count">{list.length}</span>
-          </div>
-          <div className="lib-grid">
-            {list.map((t) => (
-              <div
-                key={t.id}
-                className="lib-card"
-                style={{ ['--accent' as any]: t.tag_color }}
-              >
-                <div className="lib-card-head">
-                  <span className="lib-label">{t.label}</span>
-                  {t.chrome && <span className="lib-chrome">Chrome {t.chrome}</span>}
-                </div>
-                <div className="lib-gpu mono" title={t.gpu}>{t.gpu || "—"}</div>
-                <div className="lib-card-foot">
-                  <button className="btn-sm btn-ghost" onClick={() => onUse(t.id)}>Use →</button>
-                  {t.builtin
-                    ? <span className="lib-tag">built-in</span>
-                    : <button className="btn-sm btn-ghost danger" onClick={() => onRemove(t.id)} title="Remove">✕</button>}
-                </div>
+      {groups.map(([platform, list]) => {
+        const curPage = pages[platform] || 1;
+        const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+        const safePage = Math.min(curPage, totalPages);
+        const paged = list.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+        return (
+          <div key={platform} className="lib-group" style={{ marginBottom: 24 }}>
+            <div className="lib-group-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className={`lib-group-dot lib-dot-${platform.toLowerCase()}`} />
+                <h3>{platform}</h3>
+                <span className="lib-group-count">{list.length.toLocaleString()}</span>
               </div>
-            ))}
+              {totalPages > 1 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="muted small" style={{ fontSize: "12px" }}>
+                    Page {safePage} of {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm"
+                    disabled={safePage <= 1}
+                    onClick={() => setPages((s) => ({ ...s, [platform]: safePage - 1 }))}
+                    style={{ padding: "2px 8px", fontSize: "11px" }}
+                  >
+                    ← Prev
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setPages((s) => ({ ...s, [platform]: safePage + 1 }))}
+                    style={{ padding: "2px 8px", fontSize: "11px" }}
+                  >
+                    Next →
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="lib-grid">
+              {paged.map((t) => (
+                <div
+                  key={t.id}
+                  className="lib-card"
+                  style={{ ['--accent' as any]: t.tag_color }}
+                >
+                  <div className="lib-card-head">
+                    <span className="lib-label">{t.label}</span>
+                    {t.chrome && <span className="lib-chrome">Chrome {t.chrome}</span>}
+                  </div>
+                  <div className="lib-gpu mono" title={t.gpu}>{t.gpu || "—"}</div>
+                  <div className="lib-card-foot">
+                    <button className="btn-sm btn-ghost" onClick={() => onUse(t.id)}>Use →</button>
+                    {t.builtin
+                      ? <span className="lib-tag">built-in</span>
+                      : <button className="btn-sm btn-ghost danger" onClick={() => onRemove(t.id)} title="Remove">✕</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

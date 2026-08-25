@@ -1057,13 +1057,17 @@ fn enrich_picks_for_preset(preset_id: String) -> Result<PresetEnrichPicks, Strin
     let entry = fingerprints::get(&preset_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("unknown fingerprint id: {preset_id}"))?;
-    let platform = entry
-        .payload
-        .get("navigator")
-        .and_then(|n| n.get("platform"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("macOS")
-        .to_string();
+    let platform = if !entry.platform.is_empty() {
+        entry.platform.clone()
+    } else {
+        entry
+            .payload
+            .get("navigator")
+            .and_then(|n| n.get("platform"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Windows")
+            .to_string()
+    };
     let mut payload = serde_json::Map::new();
     payload.insert(
         "_meta".into(),
@@ -1080,14 +1084,32 @@ fn enrich_picks_for_preset(preset_id: String) -> Result<PresetEnrichPicks, Strin
         .get("navigator")
         .and_then(|v| v.as_object())
         .ok_or("internal: navigator missing after randomize")?;
-    let cores = nav
+
+    // Check if preset specifies exact real hardware concurrency/memory (e.g. from clearcote)
+    let cores = entry
+        .payload
         .get("hardware_concurrency")
+        .or_else(|| entry.payload.get("navigator").and_then(|n| n.get("hardware_concurrency")))
         .and_then(|v| v.as_u64())
-        .ok_or("internal: hardware_concurrency missing")? as u32;
-    let mem = nav
+        .map(|v| v as u32)
+        .unwrap_or_else(|| {
+            nav.get("hardware_concurrency")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(8) as u32
+        });
+
+    let mem = entry
+        .payload
         .get("device_memory")
+        .or_else(|| entry.payload.get("navigator").and_then(|n| n.get("device_memory")))
         .and_then(|v| v.as_u64())
-        .ok_or("internal: device_memory missing")? as u32;
+        .map(|v| v as u32)
+        .unwrap_or_else(|| {
+            nav.get("device_memory")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(8) as u32
+        });
+
     let pv = nav
         .get("platform_version")
         .and_then(|v| v.as_str())
@@ -1102,8 +1124,11 @@ fn enrich_picks_for_preset(preset_id: String) -> Result<PresetEnrichPicks, Strin
 // ---- Fingerprint library ----
 
 #[tauri::command]
-fn fingerprint_list() -> Result<Vec<fingerprints::LibraryEntry>, String> {
-    fingerprints::list_all().map_err(|e| e.to_string())
+async fn fingerprint_list() -> Result<Vec<fingerprints::LibraryEntry>, String> {
+    tokio::task::spawn_blocking(fingerprints::list_all)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1694,6 +1719,11 @@ pub fn run() {
             // current engine version (independent of the fingerprint seed).
             tauri::async_runtime::spawn(async {
                 runtime::ensure_profiles_migrated().await;
+            });
+
+            // Pre-warm fingerprints library index into memory concurrently on startup.
+            tauri::async_runtime::spawn(async {
+                let _ = tokio::task::spawn_blocking(crate::fingerprints::list_all).await;
             });
 
             // Clean up temporary profiles from crashed runs.
