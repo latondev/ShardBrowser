@@ -37,7 +37,7 @@ function loadShardLauncherConfig() {
       try {
         const raw = readFileSync(settingsPath, "utf-8");
         const settings = JSON.parse(raw);
-        const port = settings.api_port || 40326;
+        const port = settings.api_port || 40325;
         const secret = settings.api_secret || "";
         let token = "";
         if (secret) {
@@ -54,7 +54,7 @@ function loadShardLauncherConfig() {
       } catch {}
     }
   }
-  return { url: "http://127.0.0.1:40326", token: "" };
+  return { url: "http://127.0.0.1:40325", token: "" };
 }
 
 const DEFAULT_LAUNCHER_CONFIG = loadShardLauncherConfig();

@@ -385,6 +385,62 @@ async fn delete_folder_ep(Path(folder): Path<String>, Query(q): Query<DeleteFold
     })))
 }
 
+async fn export_folder_ep(Path(folder): Path<String>) -> ApiResult {
+    let list = crate::profile::load_folder_profiles(&folder)
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(serde_json::to_value(list).unwrap_or(Value::Null)))
+}
+
+async fn import_folder_ep(Path(folder): Path<String>, Json(body): Json<Value>) -> ApiResult {
+    let payloads: Vec<Value> = match body {
+        Value::Array(arr) => arr,
+        Value::Object(_) => vec![body],
+        _ => return Err(err(StatusCode::BAD_REQUEST, "expected an object or array of profiles")),
+    };
+    let mut n = 0;
+    for mut payload in payloads {
+        if let Some(obj) = payload.as_object_mut() {
+            match obj.get_mut("_meta").and_then(|m| m.as_object_mut()) {
+                Some(meta) => {
+                    meta.insert("id".into(), Value::String(String::new()));
+                    meta.insert("folder".into(), Value::String(folder.clone()));
+                }
+                None => {
+                    obj.insert("_meta".into(), json!({ "id": "", "folder": folder }));
+                }
+            }
+        }
+        crate::save_profile_core(None, payload, false)
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        n += 1;
+    }
+    crate::notify_store_changed("profiles");
+    Ok(Json(json!({ "imported": n, "folder": folder })))
+}
+
+#[derive(Deserialize)]
+struct ZipExportReq {
+    path: String,
+}
+
+async fn export_folder_zip_ep(Path(folder): Path<String>, Json(body): Json<ZipExportReq>) -> ApiResult {
+    let summary = crate::group_zip::export_group_to_zip(&folder, std::path::Path::new(&body.path))
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(serde_json::to_value(summary).unwrap_or(Value::Null)))
+}
+
+#[derive(Deserialize)]
+struct ZipImportReq {
+    path: String,
+    folder: Option<String>,
+}
+
+async fn import_folder_zip_ep(Json(body): Json<ZipImportReq>) -> ApiResult {
+    let summary = crate::group_zip::import_group_from_zip(std::path::Path::new(&body.path), body.folder)
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(serde_json::to_value(summary).unwrap_or(Value::Null)))
+}
+
 #[derive(Deserialize, Default)]
 struct StartReq {
     #[serde(default)]
@@ -394,6 +450,25 @@ struct StartReq {
 /// Launch with CDP; body `{ "headless": true }` opt-in.
 async fn start_profile(Path(id): Path<String>, body: Option<Json<StartReq>>) -> ApiResult {
     let headless = body.map(|Json(b)| b.headless).unwrap_or(false);
+
+    // If profile is already running, check if it has a live CDP endpoint
+    if crate::is_profile_running(&id) {
+        if let Some(cdp) = crate::process::Tracker::shared().cdp(&id) {
+            let running = crate::process::Tracker::shared().running();
+            let pid = running.iter().find(|r| r.profile_id == id).map(|r| r.pid).unwrap_or(0);
+            return Ok(Json(json!({
+                "profile_id": id,
+                "pid": pid,
+                "headless": headless,
+                "cdp": cdp,
+            })));
+        } else {
+            // Running without CDP (e.g. launched from UI); restart cleanly with CDP enabled
+            let _ = crate::process::Tracker::shared().kill(&id).await;
+            tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        }
+    }
+
     let outcome = crate::launch::launch_profile(&id, true, headless)
         .await
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -608,6 +683,10 @@ pub async fn serve(secret: String, port: u16) {
         .route("/profiles/:id/cookies", get(export_cookies).post(import_cookies))
         .route("/folders", get(list_folders))
         .route("/folders/:folder", patch(rename_folder_ep).delete(delete_folder_ep))
+        .route("/folders/:folder/export", get(export_folder_ep))
+        .route("/folders/:folder/export-zip", post(export_folder_zip_ep))
+        .route("/folders/:folder/import", post(import_folder_ep))
+        .route("/folders/import-zip", post(import_folder_zip_ep))
         .route("/folders/:folder/profiles", post(create_profile_in_folder))
         .route("/fingerprint/new", get(new_fingerprint))
         .route("/fingerprint/new/:platform", get(new_fingerprint_for))

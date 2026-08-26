@@ -109,7 +109,7 @@ function ConfirmHost() {
   if (!req) return null;
   const done = (v: any) => { req.resolve(v); setReq(null); };
   return (
-    <div className="dialog-bg" onClick={() => done(null)}>
+    <div className="dialog-bg" onClick={(e) => { if (e.target === e.currentTarget) done(null); }}>
       <div className="dialog dialog-confirm" onClick={(e) => e.stopPropagation()}>
         <header className="dialog-head">
           <h2>{req.title ?? "Confirm"}</h2>
@@ -123,7 +123,10 @@ function ConfirmHost() {
             <button
               key={i}
               className={`btn-sm ${b.primary ? "btn-primary" : "btn-ghost"} ${b.danger ? "danger" : ""}`}
-              onClick={() => done(b.value)}
+              onClick={(e) => {
+                e.stopPropagation();
+                done(b.value);
+              }}
             >
               {b.label}
             </button>
@@ -234,7 +237,11 @@ function useContextMenu() {
           <button
             key={i}
             className={`ctx-item ${it.danger ? "ctx-danger" : ""}`}
-            onClick={() => { it.onClick(); close(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              close();
+              setTimeout(() => it.onClick(), 10);
+            }}
           >
             {it.label}
           </button>
@@ -1338,41 +1345,50 @@ function BrowsersView() {
   };
 
   const deleteFolder = async (f: string) => {
-    const count = profiles.filter((p) => p.folder === f).length;
+    const targetFolder = f.trim();
+    const count = profiles.filter((p) => (p.folder || "").trim().toLowerCase() === targetFolder.toLowerCase()).length;
     // Three outcomes: delete profiles, unfile, cancel.
     const choice = await confirmModal({
-      title: `Delete folder “${f}”`,
+      title: `Delete folder “${targetFolder}”`,
       message:
         count > 0
           ? `This folder has ${count} profile${count === 1 ? "" : "s"}. ` +
             `Delete them too, or keep them (they move to “All”)?`
-          : `Delete the empty folder “${f}”?`,
+          : `Delete the empty folder “${targetFolder}”?`,
       buttons:
         count > 0
           ? [
               { label: "Cancel", value: "cancel" },
-              { label: "Keep profiles", value: "keep" },
-              { label: "Delete profiles", value: "delete", danger: true },
+              { label: "Keep profiles (Move to All)", value: "keep" },
+              { label: "Delete folder & profiles", value: "delete", danger: true },
             ]
           : [
               { label: "Cancel", value: "cancel" },
-              { label: "Delete", value: "keep", danger: true },
+              { label: "Delete folder", value: "keep", danger: true },
             ],
     });
     if (choice == null || choice === "cancel") return;
     const alsoDelete = choice === "delete";
     try {
-      const n = await invoke<number>("folder_delete", { folder: f, deleteProfiles: alsoDelete });
+      if (alsoDelete) {
+        for (const p of profiles) {
+          if ((p.folder || "").trim().toLowerCase() === targetFolder.toLowerCase() && running[p.id]) {
+            try { await invoke("process_kill", { profileId: p.id }); } catch {}
+          }
+        }
+      }
+      const n = await invoke<number>("folder_delete", { folder: targetFolder, deleteProfiles: alsoDelete });
       // The folder lives in two places: profile tags (cleared by folder_delete)
       // and the localStorage registry of empty folders.  Drop it from the
       // registry too, otherwise the tab lingers after every profile is gone.
+      forgetFolder(targetFolder);
       forgetFolder(f);
-      if (folder === f) setFolder("all");
-      reload();
+      if (folder.toLowerCase() === targetFolder.toLowerCase()) setFolder("all");
+      await reload();
       toast.ok(
         alsoDelete
-          ? `Deleted folder “${f}” + ${n} profile${n === 1 ? "" : "s"}`
-          : `Removed folder “${f}” (${n} profile${n === 1 ? "" : "s"} kept)`,
+          ? `Deleted folder “${targetFolder}” + ${n} profile${n === 1 ? "" : "s"}`
+          : `Removed folder “${targetFolder}” (${n} profile${n === 1 ? "" : "s"} kept in All)`,
       );
     } catch (e) { toast.err(String(e)); }
   };
@@ -1411,20 +1427,131 @@ function BrowsersView() {
     try {
       const payloads = await Promise.all(ids.map((id) => invoke<any>("profile_get", { id })));
       await clip.write(JSON.stringify(payloads, null, 2));
-      toast.ok(`Copied ${payloads.length} to clipboard`);
+      toast.ok(`Copied ${payloads.length} profile${payloads.length === 1 ? "" : "s"} to clipboard`);
     } catch (e) { toast.err(String(e)); }
   };
 
+  type GroupExportSummary = {
+    group_name: string;
+    profiles_count: number;
+    total_cookies_count: number;
+    file_path: string;
+  };
+
+  type GroupImportSummary = {
+    group_name: string;
+    profiles_imported: number;
+    cookies_imported: number;
+    profile_ids: string[];
+  };
+
+  const exportGroupToZip = async (targetFolder: string) => {
+    try {
+      const safeName = (targetFolder === "all" ? "all-profiles" : targetFolder).replace(/[^\w.-]+/g, "_");
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const defaultFilename = `${safeName}_${timestamp}.zip`;
+
+      const path = await saveDialog({
+        defaultPath: defaultFilename,
+        filters: [{ name: "ZIP Archive", extensions: ["zip"] }],
+      });
+      if (typeof path !== "string") return;
+
+      const summary = await invoke<GroupExportSummary>("group_export_zip", { folder: targetFolder, path });
+      toast.ok(`Exported group “${summary.group_name}” (${summary.profiles_count} profiles, ${summary.total_cookies_count} cookies) to ZIP!`);
+      const dir = path.replace(/[/\\][^/\\]*$/, "");
+      try { await openPath(dir); } catch {}
+    } catch (e) { toast.err("ZIP export failed: " + String(e)); }
+  };
+
+  const importGroupFromZip = async (targetDefaultFolder?: string) => {
+    try {
+      const path = await open({
+        multiple: false,
+        directory: false,
+        title: "Select Group ZIP Archive to Import",
+        filters: [{ name: "ZIP Archive", extensions: ["zip"] }],
+      });
+      if (typeof path !== "string") return;
+
+      const folderOverride = (targetDefaultFolder && targetDefaultFolder !== "all") ? targetDefaultFolder : (folder !== "all" ? folder : undefined);
+      const summary = await invoke<GroupImportSummary>("group_import_zip", { path, folderOverride });
+      await reload();
+      toast.ok(`Successfully restored group “${summary.group_name}”: ${summary.profiles_imported} profiles & ${summary.cookies_imported} cookies imported!`);
+    } catch (e) { toast.err("ZIP import failed: " + String(e)); }
+  };
+
+  const exportSelectedToFile = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    try {
+      const path = await saveDialog({
+        defaultPath: `selected-${ids.length}-profiles.json`,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (typeof path !== "string") return;
+      const count = await invoke<number>("profiles_export_to_file", { ids, path });
+      toast.ok(`Exported ${count} profile${count === 1 ? "" : "s"} to file`);
+      const dir = path.replace(/[/\\][^/\\]*$/, "");
+      try { await openPath(dir); } catch {}
+    } catch (e) { toast.err("Export failed: " + String(e)); }
+  };
+
+  const exportFolderToFile = async (targetFolder: string) => {
+    try {
+      const safeName = (targetFolder === "all" ? "all-profiles" : targetFolder).replace(/[^\w.-]+/g, "_");
+      const path = await saveDialog({
+        defaultPath: `${safeName}-export.json`,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (typeof path !== "string") return;
+      const count = await invoke<number>("folder_export_to_file", { folder: targetFolder, path });
+      toast.ok(`Exported ${count} profile${count === 1 ? "" : "s"} to ${path.replace(/^.*[\\/]/, "")}`);
+      const dir = path.replace(/[/\\][^/\\]*$/, "");
+      try { await openPath(dir); } catch {}
+    } catch (e) { toast.err("Export failed: " + String(e)); }
+  };
+
+  const exportFolderToClipboard = async (targetFolder: string) => {
+    try {
+      const list = await invoke<any[]>("folder_export", { folder: targetFolder });
+      if (!list || list.length === 0) {
+        toast.info(`No profiles found in group “${targetFolder}”`);
+        return;
+      }
+      await clip.write(JSON.stringify(list, null, 2));
+      toast.ok(`Copied ${list.length} profile${list.length === 1 ? "" : "s"} in “${targetFolder}” to clipboard`);
+    } catch (e) { toast.err("Copy failed: " + String(e)); }
+  };
+
+  // Import profile JSON from file → fresh profiles.
+  const importProfilesFromFile = async (targetDefaultFolder?: string) => {
+    try {
+      const path = await open({
+        multiple: false,
+        directory: false,
+        title: "Select Profiles JSON file to Import",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (typeof path !== "string") return;
+      const targetFolder = (targetDefaultFolder && targetDefaultFolder !== "all") ? targetDefaultFolder : (folder !== "all" ? folder : undefined);
+      const n = await invoke<number>("profile_import_from_file", { path, defaultFolder: targetFolder });
+      reload();
+      toast.ok(`Imported ${n} profile${n === 1 ? "" : "s"}${targetFolder ? ` into group “${targetFolder}”` : ""}`);
+    } catch (e) { toast.err("Import failed: " + String(e)); }
+  };
+
   // Paste profile JSON from clipboard → fresh profiles.
-  const bulkImport = async () => {
+  const bulkImport = async (targetDefaultFolder?: string) => {
     try {
       const text = await clip.read();
       if (!text.trim()) { toast.err("Clipboard is empty"); return; }
       const data = JSON.parse(text);
       const arr = Array.isArray(data) ? data : [data];
-      const n = await invoke<number>("profile_import", { payloads: arr });
+      const targetFolder = (targetDefaultFolder && targetDefaultFolder !== "all") ? targetDefaultFolder : (folder !== "all" ? folder : undefined);
+      const n = await invoke<number>("profile_import", { payloads: arr, defaultFolder: targetFolder });
       reload();
-      toast.ok(`Imported ${n} profile${n === 1 ? "" : "s"}`);
+      toast.ok(`Imported ${n} profile${n === 1 ? "" : "s"}${targetFolder ? ` into group “${targetFolder}”` : ""}`);
     } catch (e) { toast.err("Import failed: " + String(e)); }
   };
 
@@ -1493,6 +1620,18 @@ function BrowsersView() {
             <button
               className={`folder-tab ${folder === "all" ? "active" : ""} ${dropTarget === "__all__" ? "folder-tab-drop" : ""}`}
               onClick={() => setFolder("all")}
+              title="Right-click for ZIP / JSON export/import all profiles"
+              onContextMenu={(e) =>
+                ctx.open(e, [
+                  { label: "📦 Export all profiles & cookies to ZIP (.zip)", onClick: () => exportGroupToZip("all") },
+                  { label: "📥 Import profiles & cookies from ZIP (.zip)…", onClick: () => importGroupFromZip("all") },
+                  { sep: true, label: "", onClick: () => {} },
+                  { label: "Export all profiles to File (.json)", onClick: () => exportFolderToFile("all") },
+                  { label: "Copy all profiles to Clipboard", onClick: () => exportFolderToClipboard("all") },
+                  { label: "Import profiles from File (.json)…", onClick: () => importProfilesFromFile("all") },
+                  { label: "Import profiles from Clipboard", onClick: () => bulkImport("all") },
+                ])
+              }
               // Unconditional preventDefault on dragover is the *only* way
               // HTML5 marks the element as a valid drop target — any extra
               // logic inside the handler is fine, but the preventDefault
@@ -1525,10 +1664,18 @@ function BrowsersView() {
                 key={f}
                 className={`folder-tab ${folder === f ? "active" : ""} ${dropTarget === f ? "folder-tab-drop" : ""}`}
                 onClick={() => setFolder(f)}
-                title="Right-click for folder actions · drop profiles to move them"
+                title="Right-click for ZIP / Group actions · drop profiles to move them"
                 onContextMenu={(e) =>
                   ctx.open(e, [
-                    { label: "Delete folder…", onClick: () => deleteFolder(f), danger: true },
+                    { label: `📦 Export group “${f}” as ZIP (with cookies)`, onClick: () => exportGroupToZip(f) },
+                    { label: `📥 Import group from ZIP (.zip)…`, onClick: () => importGroupFromZip(f) },
+                    { sep: true, label: "", onClick: () => {} },
+                    { label: `Export group “${f}” to File (.json)`, onClick: () => exportFolderToFile(f) },
+                    { label: `Copy group “${f}” profiles to Clipboard`, onClick: () => exportFolderToClipboard(f) },
+                    { label: `Import profiles into “${f}” from File…`, onClick: () => importProfilesFromFile(f) },
+                    { label: `Import profiles into “${f}” from Clipboard`, onClick: () => bulkImport(f) },
+                    { sep: true, label: "", onClick: () => {} },
+                    { label: `Delete folder “${f}”…`, onClick: () => deleteFolder(f), danger: true },
                   ])
                 }
                 onDragOver={(e) => {
@@ -1570,12 +1717,42 @@ function BrowsersView() {
               <span>{selected.size} selected</span>
               <button className="btn-ghost btn-sm" onClick={bulkLaunch}><Icon.Play /> Launch</button>
               <button className="btn-ghost btn-sm" onClick={bulkStop}><Icon.Stop /> Stop</button>
-              <button className="btn-ghost btn-sm" onClick={bulkExport}><Icon.Upload /> Export</button>
+              <button className="btn-ghost btn-sm" onClick={exportSelectedToFile} title="Save selected profiles to a JSON file"><Icon.Upload /> Export File</button>
+              <button className="btn-ghost btn-sm" onClick={bulkExport} title="Copy selected profiles to clipboard"><Icon.Clone /> Copy JSON</button>
               <button className="btn-ghost btn-sm" onClick={bulkDelete}><Icon.Trash /> Delete</button>
               <button className="btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear</button>
             </div>
           )}
-          <button className="btn-ghost" onClick={bulkImport} title="Create profiles from exported JSON in the clipboard"><Icon.Download /> Import</button>
+          {folder !== "all" && (
+            <button
+              className="btn-ghost"
+              onClick={() => exportGroupToZip(folder)}
+              title={`Export group “${folder}” and all cookies into a .zip archive`}
+            >
+              <Icon.Upload /> Export Group (.zip)
+            </button>
+          )}
+          <button
+            className="btn-ghost"
+            onClick={() => importGroupFromZip(folder !== "all" ? folder : undefined)}
+            title="Import group & cookies from a .zip archive"
+          >
+            <Icon.Download /> Import ZIP
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={() => importProfilesFromFile(folder !== "all" ? folder : undefined)}
+            title="Import profiles from a JSON file"
+          >
+            <Icon.Download /> Import JSON
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={() => bulkImport(folder !== "all" ? folder : undefined)}
+            title="Import profiles from exported JSON in the clipboard"
+          >
+            <Icon.Clone /> Paste JSON
+          </button>
           <button className="btn-ghost" onClick={() => setTemplatePickerOpen(true)}><ShardMini /> From template</button>
           <button className="btn-primary" onClick={newProfile}>+ New profile</button>
         </div>

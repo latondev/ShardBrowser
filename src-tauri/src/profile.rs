@@ -146,6 +146,30 @@ pub fn list_all() -> Result<Vec<ProfileMeta>> {
     Ok(out)
 }
 
+/// Load full stored profiles matching a folder (or all if folder is empty / "all").
+pub fn load_folder_profiles(folder: &str) -> Result<Vec<StoredProfile>> {
+    let dir = store::profiles_dir()?;
+    let mut out = Vec::new();
+    let is_all = folder.is_empty() || folder.eq_ignore_ascii_case("all");
+    for entry in fs::read_dir(&dir)? {
+        let entry = entry?;
+        if entry.path().extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let body = fs::read_to_string(entry.path())?;
+        let Ok(stored): std::result::Result<StoredProfile, _> = serde_json::from_str(&body) else {
+            continue;
+        };
+        if stored.meta.temporary {
+            continue;
+        }
+        if is_all || stored.meta.folder.eq_ignore_ascii_case(folder) {
+            out.push(stored);
+        }
+    }
+    Ok(out)
+}
+
 /// Delete leftover temporary profiles after a crash; returns count.
 pub fn purge_temporary() -> Result<usize> {
     let dir = store::profiles_dir()?;
@@ -395,6 +419,7 @@ pub fn rename_folder(old: &str, new: &str) -> Result<usize> {
 pub fn delete_folder(name: &str, delete_profiles: bool) -> Result<usize> {
     let dir = store::profiles_dir()?;
     let mut n = 0;
+    let target = name.trim();
     for entry in fs::read_dir(&dir)? {
         let entry = entry?;
         if entry.path().extension().and_then(|s| s.to_str()) != Some("json") {
@@ -405,7 +430,7 @@ pub fn delete_folder(name: &str, delete_profiles: bool) -> Result<usize> {
         else {
             continue;
         };
-        if stored.meta.folder == name {
+        if stored.meta.folder.trim().eq_ignore_ascii_case(target) {
             if delete_profiles {
                 let _ = delete(&stored.meta.id);
             } else {

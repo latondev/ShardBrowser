@@ -108,32 +108,32 @@ export class BrowserManager {
         
         let existingProfiles = await this._apiClient.listProfiles().catch(() => []);
         
-        // Filter by group if specified
-        if (group && !targetProfileId) {
-          const normalizedGroup = group.trim().toLowerCase();
+        // Always filter by group (default 'Veo3') if no target profileId is provided
+        const groupName = group || 'Veo3';
+        if (!targetProfileId) {
+          const normalizedGroup = groupName.trim().toLowerCase();
           const filtered = existingProfiles.filter((p) => (p.folder || '').trim().toLowerCase() === normalizedGroup);
           if (filtered.length > 0) {
             existingProfiles = filtered;
-            logger.info(`Filtered profiles by group "${group}": found ${filtered.length} profile(s).`);
+            logger.info(`Filtered profiles by group "${groupName}": found ${filtered.length} profile(s).`);
           } else {
-            logger.info(`No existing profile in group "${group}", will create one.`);
+            logger.info(`No existing profile in group "${groupName}", will create one.`);
             existingProfiles = [];
           }
         }
 
-        // If no profileId specified, check if there's any existing profile or create a permanent one
+        // If no profileId specified, check if there's an existing profile or create one in the group
         if (!targetProfileId) {
-          const running = existingProfiles.find((p) => p.running && p.cdp?.port);
-          if (running && running.cdp && (await isPortOpen(running.cdp.port))) {
+          const running = existingProfiles.find((p) => p.running && (p.cdp?.web_socket_debugger_url || p.cdp?.ws || p.cdp?.port));
+          if (running && running.cdp) {
             targetProfileId = running.id;
             logger.info(`Using active running ShardBrowser profile: "${running.name}" (${running.id}) [Group: ${running.folder || 'None'}]`);
-            const cdpTarget = running.cdp.ws || `http://127.0.0.1:${running.cdp.port}`;
+            const cdpTarget = (running.cdp as any).web_socket_debugger_url || running.cdp.ws || `http://127.0.0.1:${running.cdp.port}`;
             return await this.connect(cdpTarget);
           } else if (existingProfiles.length > 0) {
             targetProfileId = existingProfiles[0].id;
             logger.info(`Using ShardBrowser profile: "${existingProfiles[0].name}" (${targetProfileId}) [Group: ${existingProfiles[0].folder || 'None'}]`);
           } else {
-            const groupName = group || 'Veo3';
             logger.info(`Creating a new persistent profile in group "${groupName}" in ShardBrowser...`);
             const newProf = await this._apiClient.createProfile(`AutoFlow Profile`, groupName);
             targetProfileId = newProf.id;
@@ -143,21 +143,20 @@ export class BrowserManager {
 
         this._startedProfileId = targetProfileId;
         logger.info(`Starting ShardBrowser profile [${targetProfileId}] via Launcher API...`);
-        // If it was in a stale running state, stop first
-        await this._apiClient.stopProfile(targetProfileId).catch(() => {});
-        await new Promise((r) => setTimeout(r, 600));
 
         const startResult = await this._apiClient.startProfile(targetProfileId, false);
         
-        const cdpTarget = startResult.cdp?.ws
-          ? startResult.cdp.ws
-          : startResult.cdp?.port
-          ? `http://127.0.0.1:${startResult.cdp.port}`
-          : `http://127.0.0.1:${debugPort}`;
+        const cdpTarget = (startResult.cdp as any)?.web_socket_debugger_url ||
+          startResult.cdp?.ws ||
+          (startResult.cdp?.port ? `http://127.0.0.1:${startResult.cdp.port}` : undefined);
+
+        if (!cdpTarget) {
+          throw new Error(`Launcher did not return a valid CDP endpoint for profile ${targetProfileId}`);
+        }
 
         logger.info(`Profile launched, connecting via CDP: ${cdpTarget}`);
         // Wait for Chrome pages to initialize
-        await new Promise((r) => setTimeout(r, 1500));
+        await new Promise((r) => setTimeout(r, 1000));
         return await this.connect(cdpTarget);
       } catch (err: any) {
         logger.warn(`Failed to launch via ShardBrowser API: ${err.message}. Falling back to direct launch.`);

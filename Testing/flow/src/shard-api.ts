@@ -17,9 +17,11 @@ export interface ProfileMeta {
   notes?: string;
   running?: boolean;
   cdp?: {
-    port: number;
+    port?: number;
     ws?: string;
     http?: string;
+    http_url?: string;
+    web_socket_debugger_url?: string;
   };
 }
 
@@ -27,10 +29,12 @@ export interface StartProfileResult {
   profile_id: string;
   pid: number;
   headless: boolean;
-  cdp: {
-    port: number;
+  cdp?: {
+    port?: number;
     ws?: string;
     http?: string;
+    http_url?: string;
+    web_socket_debugger_url?: string;
   };
 }
 

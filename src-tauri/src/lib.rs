@@ -3,6 +3,7 @@
 mod api;
 mod cookies;
 mod fingerprints;
+mod group_zip;
 mod launch;
 mod mcp_setup;
 mod process;
@@ -893,23 +894,90 @@ fn profile_clone(id: String) -> Result<profile::ProfileMeta, String> {
 
 /// Import profiles verbatim under fresh ids; returns the count.
 #[tauri::command]
-fn profile_import(payloads: Vec<Value>) -> Result<usize, String> {
+fn profile_import(payloads: Vec<Value>, default_folder: Option<String>) -> Result<usize, String> {
     let mut n = 0;
     for mut payload in payloads {
         if let Some(obj) = payload.as_object_mut() {
             match obj.get_mut("_meta").and_then(|m| m.as_object_mut()) {
                 Some(meta) => {
                     meta.insert("id".into(), Value::String(String::new()));
+                    if let Some(ref df) = default_folder {
+                        if !df.is_empty() {
+                            let curr_folder = meta.get("folder").and_then(|v| v.as_str()).unwrap_or("");
+                            if curr_folder.is_empty() {
+                                meta.insert("folder".into(), Value::String(df.clone()));
+                            }
+                        }
+                    }
                 }
                 None => {
-                    obj.insert("_meta".into(), serde_json::json!({ "id": "" }));
+                    let mut meta = serde_json::json!({ "id": "" });
+                    if let Some(ref df) = default_folder {
+                        if !df.is_empty() {
+                            meta["folder"] = Value::String(df.clone());
+                        }
+                    }
+                    obj.insert("_meta".into(), meta);
                 }
             }
         }
         save_profile_core(None, payload, false)?;
         n += 1;
     }
+    notify_store_changed("profiles");
     Ok(n)
+}
+
+#[tauri::command]
+fn folder_export(folder: String) -> Result<Vec<Value>, String> {
+    let list = profile::load_folder_profiles(&folder).map_err(|e| e.to_string())?;
+    let vals: Vec<Value> = list.into_iter().filter_map(|p| serde_json::to_value(p).ok()).collect();
+    Ok(vals)
+}
+
+#[tauri::command]
+fn folder_export_to_file(folder: String, path: String) -> Result<usize, String> {
+    let list = profile::load_folder_profiles(&folder).map_err(|e| e.to_string())?;
+    let count = list.len();
+    let json = serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
+#[tauri::command]
+fn profiles_export_to_file(ids: Vec<String>, path: String) -> Result<usize, String> {
+    let mut list = Vec::new();
+    for id in ids {
+        if let Ok(stored) = profile::load_raw(&id) {
+            list.push(stored);
+        }
+    }
+    let count = list.len();
+    let json = serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
+#[tauri::command]
+fn profile_import_from_file(path: String, default_folder: Option<String>) -> Result<usize, String> {
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let data: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let payloads: Vec<Value> = match data {
+        Value::Array(arr) => arr,
+        Value::Object(_) => vec![data],
+        _ => return Err("Invalid JSON format: expected an object or array of profiles".into()),
+    };
+    profile_import(payloads, default_folder)
+}
+
+#[tauri::command]
+fn group_export_zip(folder: String, path: String) -> Result<group_zip::GroupExportSummary, String> {
+    group_zip::export_group_to_zip(&folder, std::path::Path::new(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn group_import_zip(path: String, folder_override: Option<String>) -> Result<group_zip::GroupImportSummary, String> {
+    group_zip::import_group_from_zip(std::path::Path::new(&path), folder_override).map_err(|e| e.to_string())
 }
 
 // ---- Clipboard (via tauri-plugin-clipboard-manager; webview navigator.clipboard throws) ----
@@ -939,13 +1007,17 @@ fn profile_set_folder(id: String, folder: String) -> Result<(), String> {
 /// Rename folder (retag profiles); returns count.
 #[tauri::command]
 fn folder_rename(old: String, new: String) -> Result<usize, String> {
-    profile::rename_folder(&old, &new).map_err(|e| e.to_string())
+    let n = profile::rename_folder(&old, &new).map_err(|e| e.to_string())?;
+    notify_store_changed("profiles");
+    Ok(n)
 }
 
 /// Delete folder; `delete_profiles` true → remove, false → unfile.
 #[tauri::command]
 fn folder_delete(folder: String, delete_profiles: bool) -> Result<usize, String> {
-    profile::delete_folder(&folder, delete_profiles).map_err(|e| e.to_string())
+    let n = profile::delete_folder(&folder, delete_profiles).map_err(|e| e.to_string())?;
+    notify_store_changed("profiles");
+    Ok(n)
 }
 
 /// Host OS in fingerprint-library vocabulary (macOS/Windows/Linux).
@@ -1604,6 +1676,12 @@ pub fn run() {
             profile_bind_proxy,
             profile_clone,
             profile_import,
+            profile_import_from_file,
+            folder_export,
+            folder_export_to_file,
+            profiles_export_to_file,
+            group_export_zip,
+            group_import_zip,
             clipboard_write,
             clipboard_read,
             profile_set_pin,

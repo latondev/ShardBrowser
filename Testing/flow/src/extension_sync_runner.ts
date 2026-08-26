@@ -7,6 +7,34 @@ async function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function resolveExtensionId(browser: Browser, profileId?: string): string {
+  // 1. Kiểm tra từ targets đang chạy của browser
+  for (const t of browser.targets()) {
+    const m = t.url().match(/chrome-extension:\/\/([a-z0-9]+)/i);
+    if (m && m[1]) return m[1];
+  }
+
+  // 2. Kiểm tra từ Secure Preferences của profile
+  const appData = process.env.APPDATA || '';
+  if (appData && profileId) {
+    const secPrefs = path.join(appData, 'shardx-launcher', 'user-data', profileId, 'Default', 'Secure Preferences');
+    if (fs.existsSync(secPrefs)) {
+      try {
+        const p = JSON.parse(fs.readFileSync(secPrefs, 'utf8'));
+        const settings = p.extensions?.settings || {};
+        for (const [id, info] of Object.entries<any>(settings)) {
+          if (info.path && (info.path.includes('flow-automation') || info.path.includes('flow'))) {
+            return id;
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // 3. Fallback ID cho unpacked extension
+  return 'kelchbegmnecahfndfgncgenioagjfom';
+}
+
 export async function runExtensionWithConfig(configPath = 'config.json') {
   console.log('\n============================================================');
   console.log('🚀 [FLOW RUNNER] TỰ ĐỘNG KẾT NỐI SHARDX LAUNCHER & RENDER FLOW');
@@ -44,41 +72,37 @@ export async function runExtensionWithConfig(configPath = 'config.json') {
     }
 
     targetProfileId = profile.id;
-    let cdpPort = profile.cdp?.port;
     let cdpWs = (profile.cdp as any)?.web_socket_debugger_url || profile.cdp?.ws;
+    let cdpPort = profile.cdp?.port;
 
-    if (!profile.running || !cdpPort) {
+    if (!profile.running || !cdpWs) {
       console.log(`🚀 [ShardX] Khởi chạy Profile [${profile.name}] (ID: ${profile.id}) qua Launcher...`);
       try {
         const startRes: any = await client.startProfile(profile.id, false);
         const cdpObj = startRes?.cdp;
-        cdpPort = cdpObj?.port || profile.cdp?.port || 59664;
-        cdpWs = cdpObj?.web_socket_debugger_url || cdpObj?.ws || profile.cdp?.ws;
-        console.log(`✅ [ShardX] Profile đã bật thành công! Cổng CDP: ${cdpPort}`);
+        cdpPort = cdpObj?.port;
+        cdpWs = cdpObj?.web_socket_debugger_url || cdpObj?.ws;
+        console.log(`✅ [ShardX] Profile đã bật thành công! Cổng CDP: ${cdpPort || 'N/A'}`);
       } catch (startErr: any) {
-        console.warn(`⚠️ [ShardX] Lỗi gọi startProfile (${startErr.message}) -> Dùng cổng mặc định`);
-        cdpPort = 59664;
+        console.warn(`⚠️ [ShardX] Lỗi gọi startProfile (${startErr.message})`);
       }
     } else {
-      console.log(`⚡ [ShardX] Profile [${profile.name}] đang chạy sẵn tại cổng CDP: ${cdpPort}`);
+      console.log(`⚡ [ShardX] Profile [${profile.name}] đang chạy sẵn tại cổng CDP: ${cdpPort || 'N/A'}`);
     }
 
-    try {
-      if (cdpWs) {
-        browser = await puppeteer.connect({ browserWSEndpoint: cdpWs });
-      } else {
-        browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${cdpPort || 59664}` });
-      }
-    } catch (connErr) {
-      console.warn(`⚠️ [ShardX] Không kết nối được cổng ${cdpPort} (${(connErr as Error).message}) -> Thử fallback 59664...`);
-      browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:59664' });
+    if (cdpWs) {
+      browser = await puppeteer.connect({ browserWSEndpoint: cdpWs, defaultViewport: null });
+    } else if (cdpPort) {
+      browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${cdpPort}`, defaultViewport: null });
+    } else {
+      throw new Error(`[ShardX] Không lấy được endpoint CDP hợp lệ từ Launcher cho Profile [${profile.name}]`);
     }
   } else {
-    console.log('\n⚠️ [ShardX Launcher] Launcher chưa bật, fallback kết nối trực tiếp CDP cổng 59664...');
-    browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:59664' });
+    throw new Error('ShardBrowser Launcher chưa được bật! Vui lòng khởi động Launcher trước khi chạy automation.');
   }
 
-  const extId = 'efkiebdjefdlcplbhbiipaeefpblijfl';
+  const extId = resolveExtensionId(browser, targetProfileId || undefined);
+  console.log(`🧩 Đã nhận diện Extension ID: ${extId}`);
 
   // 2. Mở Google Flow và TẠO MỘT DỰ ÁN MỚI
   console.log('\n🌐 2. Mở Google Flow và khởi tạo Canvas Dự Án Mới...');
