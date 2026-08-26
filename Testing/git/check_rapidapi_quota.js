@@ -25,6 +25,14 @@ const RED = "\x1b[31m";
 const CYAN = "\x1b[36m";
 const GRAY = "\x1b[90m";
 
+// Hàm căn lề chuẩn xác (tự động trừ độ dài ANSI code và ký tự đặc biệt)
+function padColumn(str, len, align = "left") {
+  const s = String(str);
+  const cleanLen = s.replace(/\x1b\[[0-9;]*m/g, "").length;
+  const padSize = Math.max(0, len - cleanLen);
+  return align === "right" ? " ".repeat(padSize) + s : s + " ".repeat(padSize);
+}
+
 export class RapidApiQuotaChecker {
   _filePath = "";
   _keys = [];
@@ -88,7 +96,7 @@ export class RapidApiQuotaChecker {
         remaining,
         used,
         status: "ACTIVE",
-        message: "Hoạt động tốt",
+        label: "✅ Hoạt động",
       };
     } catch (err) {
       const statusCode = err.response?.status;
@@ -106,7 +114,7 @@ export class RapidApiQuotaChecker {
           remaining: 0,
           used: limit,
           status: "QUOTA_EXCEEDED",
-          message: "Hết 100/100 lượt (Chờ reset 24h)",
+          label: "⚠️ Hết 100/100",
         };
       }
 
@@ -119,7 +127,7 @@ export class RapidApiQuotaChecker {
           remaining: 0,
           used: 0,
           status: "FORBIDDEN",
-          message: "Chưa Subscribe Free trên RapidAPI",
+          label: "❌ Chưa Sub Free",
         };
       }
 
@@ -132,7 +140,7 @@ export class RapidApiQuotaChecker {
           remaining,
           used,
           status: "SERVER_BUSY",
-          message: "Server bận (Key còn lượt)",
+          label: "⏳ Server bận",
         };
       }
 
@@ -144,7 +152,7 @@ export class RapidApiQuotaChecker {
         remaining: 0,
         used: 0,
         status: "ERROR",
-        message: err.message,
+        label: "❌ Lỗi mạng",
       };
     }
   }
@@ -167,9 +175,9 @@ export class RapidApiQuotaChecker {
     }
 
     // In bảng kết quả
-    console.log(`+-----+--------------------------+-----------------+----------+----------+---------+-------------------------------+`);
-    console.log(`| STT | Username / Account       | Key (Rút gọn)   | Đã Dùng  | Còn Lại  | Hạn Mức | Trạng Thái                    |`);
-    console.log(`+-----+--------------------------+-----------------+----------+----------+---------+-------------------------------+`);
+    console.log(`+-----+--------------------------+-----------------+----------+----------+---------+------------------+`);
+    console.log(`| STT | Username / Account       | Key (Rút gọn)   |  Đã Dùng |  Còn Lại | Hạn Mức | Trạng Thái       |`);
+    console.log(`+-----+--------------------------+-----------------+----------+----------+---------+------------------+`);
 
     let totalUsed = 0;
     let totalRemaining = 0;
@@ -182,31 +190,32 @@ export class RapidApiQuotaChecker {
       totalRemaining += r.remaining;
       totalLimit += r.limit;
 
-      let statusFormatted = "";
+      let color = RESET;
       if (r.status === "ACTIVE") {
         activeKeysCount++;
-        statusFormatted = `${GREEN}✅ ${r.message}${RESET}`;
+        color = GREEN;
       } else if (r.status === "SERVER_BUSY") {
         activeKeysCount++;
-        statusFormatted = `${YELLOW}⏳ ${r.message}${RESET}`;
+        color = YELLOW;
       } else if (r.status === "QUOTA_EXCEEDED") {
         exhaustedKeysCount++;
-        statusFormatted = `${RED}⚠️  ${r.message}${RESET}`;
+        color = RED;
       } else {
-        statusFormatted = `${RED}❌ ${r.message}${RESET}`;
+        color = RED;
       }
 
-      const sttStr = r.stt.toString().padEnd(3);
-      const userStr = r.username.padEnd(24);
-      const keyStr = `${r.apiKey.slice(0, 10)}...`.padEnd(15);
-      const usedStr = `${r.used}`.padStart(6) + "   ";
-      const remStr = `${r.remaining}`.padStart(6) + "   ";
-      const limitStr = `${r.limit}`.padStart(5) + "  ";
+      const sttCol = padColumn(r.stt, 3, "right");
+      const userCol = padColumn(r.username.slice(0, 24), 24);
+      const keyCol = padColumn(`${r.apiKey.slice(0, 10)}...`, 15);
+      const usedCol = padColumn(r.used, 8, "right");
+      const remCol = padColumn(r.remaining, 8, "right");
+      const limitCol = padColumn(r.limit, 7, "right");
+      const statusCol = padColumn(`${color}${r.label}${RESET}`, 16);
 
-      console.log(`| ${sttStr} | ${userStr} | ${keyStr} | ${usedStr}| ${remStr}| ${limitStr}| ${statusFormatted.padEnd(39)} |`);
+      console.log(`| ${sttCol} | ${userCol} | ${keyCol} | ${usedCol} | ${remCol} | ${limitCol} | ${statusCol} |`);
     }
 
-    console.log(`+-----+--------------------------+-----------------+----------+----------+---------+-------------------------------+`);
+    console.log(`+-----+--------------------------+-----------------+----------+----------+---------+------------------+`);
 
     // In phần tổng kết
     console.log(`\n${BOLD}========================================================================================================${RESET}`);
