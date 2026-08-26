@@ -208,7 +208,27 @@ export class AiAgentRunner {
 
       return true;
     } catch (err) {
-      console.warn(`(!) Lỗi gõ vào ${selector}: ${err.message}`);
+      console.warn(`(!) Lỗi gõ vào ${selector} (${err.message}) -> Kích hoạt Fallback DOM injection...`);
+      // Fallback: Nếu Puppeteer keyboard gặp timeout/lỗi, dùng JavaScript DOM evaluate trực tiếp để gán giá trị
+      try {
+        const fallbackSuccess = await page.evaluate((sel, val) => {
+          const element = document.querySelector(sel);
+          if (element) {
+            element.focus();
+            element.value = val;
+            element.dispatchEvent(new Event("input", { bubbles: true }));
+            element.dispatchEvent(new Event("change", { bubbles: true }));
+            element.dispatchEvent(new Event("blur", { bubbles: true }));
+            return true;
+          }
+          return false;
+        }, selector, textToType).catch(() => false);
+
+        if (fallbackSuccess) {
+          console.log(`⚡ [Fallback DOM Fill] Đã gán giá trị thành công vào ${selector} qua DOM!`);
+          return true;
+        }
+      } catch {}
       return false;
     }
   }
@@ -763,14 +783,14 @@ export class AiAgentRunner {
 
     if (envWs) {
       console.log(`[Browser] 🔗 Đang kết nối tới WebSocket Endpoint: ${envWs}`);
-      this._browser = await puppeteer.connect({ browserWSEndpoint: envWs, defaultViewport: null });
+      this._browser = await puppeteer.connect({ browserWSEndpoint: envWs, defaultViewport: null, protocolTimeout: 240000 });
       this._ownsBrowser = false;
       return this._browser;
     }
 
     if (envCdp) {
       console.log(`[Browser] 🔗 Đang kết nối tới CDP URL: ${envCdp}`);
-      this._browser = await puppeteer.connect({ browserURL: envCdp, defaultViewport: null });
+      this._browser = await puppeteer.connect({ browserURL: envCdp, defaultViewport: null, protocolTimeout: 240000 });
       this._ownsBrowser = false;
       return this._browser;
     }
@@ -834,7 +854,7 @@ export class AiAgentRunner {
         throw new Error(`Không nhận được WebSocket CDP URL từ Launcher: ${JSON.stringify(startRes)}`);
       }
 
-      this._browser = await puppeteer.connect({ browserWSEndpoint: wsUrl, defaultViewport: null });
+      this._browser = await puppeteer.connect({ browserWSEndpoint: wsUrl, defaultViewport: null, protocolTimeout: 240000 });
       this._ownsBrowser = false;
       console.log(`🔗 [CDP Connected] Đã kết nối Puppeteer vào phiên trình duyệt cách ly.`);
       return this._browser;
@@ -843,7 +863,7 @@ export class AiAgentRunner {
     }
 
     try {
-      this._browser = await puppeteer.connect({ browserURL: "http://127.0.0.1:9222", defaultViewport: null });
+      this._browser = await puppeteer.connect({ browserURL: "http://127.0.0.1:9222", defaultViewport: null, protocolTimeout: 240000 });
       this._ownsBrowser = false;
       console.log("[Browser] 🔗 Kết nối thành công tới Chrome qua CDP http://127.0.0.1:9222");
       return this._browser;
@@ -1082,6 +1102,49 @@ export class AiAgentRunner {
       if (isEmailTakenLate) {
         console.warn(`\n⚠️ [EMAIL ĐÃ TỒN TẠI]: Địa chỉ [${this._accountState.email}] đã được đăng ký trước đó!`);
         throw new Error(`EMAIL_ALREADY_EXISTS: Email [${this._accountState.email}] đã tồn tại trên GitHub.`);
+      }
+
+      // 4.5 Kiểm tra nghiêm ngặt tính toàn vẹn của Form trước khi gửi
+      const formValues = await this._githubPage.evaluate(() => {
+        const emailEl = document.querySelector("#email, input[type='email'], input[name='user[email]'], input[autocomplete='email']");
+        const passEl = document.querySelector("#password, input[name='user[password]'], input[type='password']");
+        const loginEl = document.querySelector("#login, input[name='user[login]']");
+        return {
+          emailVal: emailEl?.value || "",
+          passVal: passEl?.value || "",
+          loginVal: loginEl?.value || "",
+        };
+      }).catch(() => ({ emailVal: "", passVal: "", loginVal: "" }));
+
+      // Nếu ô Password bị thiếu hoặc quá ngắn (do lỗi gõ phím hoặc timeout), điền bù ngay
+      if (!formValues.passVal || formValues.passVal.length < 8) {
+        console.warn("⚠️ [Password Đang Rỗng] Kích hoạt điền bù Password ngay lập tức...");
+        await this._humanType(this._githubPage, "#password, input[name='user[password]'], input[type='password']", this._accountState.password, false);
+        await this._safeSleep(1200);
+      }
+
+      // Nếu ô Email bị thiếu, điền bù
+      if (!formValues.emailVal) {
+        console.warn("⚠️ [Email Đang Rỗng] Kích hoạt điền bù Email ngay lập tức...");
+        await this._humanType(this._githubPage, "#email, input[type='email'], input[name='user[email]'], input[autocomplete='email']", this._accountState.email, false);
+        await this._safeSleep(1200);
+      }
+
+      // Nếu ô Username bị thiếu, điền bù
+      if (!formValues.loginVal) {
+        console.warn("⚠️ [Username Đang Rỗng] Kích hoạt điền bù Username ngay lập tức...");
+        await this._humanType(this._githubPage, "#login, input[name='user[login]']", this._accountState.username, false);
+        await this._safeSleep(1200);
+      }
+
+      // Kiểm tra chốt hạ: Password BẮT BUỘC phải có độ dài >= 8 ký tự
+      const isPasswordReady = await this._githubPage.evaluate(() => {
+        const passEl = document.querySelector("#password, input[name='user[password]'], input[type='password']");
+        return (passEl?.value || "").length >= 8;
+      }).catch(() => false);
+
+      if (!isPasswordReady) {
+        throw new Error("Không thể điền Password vào form đăng ký GitHub. Hủy lượt để thử lại an toàn!");
       }
 
       console.log("-> 5. Cuộn trang và bấm nút 'Create account' để gửi form...");
