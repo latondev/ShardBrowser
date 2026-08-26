@@ -544,6 +544,70 @@ export class AiAgentRunner {
     }
   }
 
+  // Xử lý sau khi nhập OTP: chờ mạng chậm, khảo sát onboarding, và chuyển tiếp an toàn
+  async _handlePostSignupFlow(page) {
+    console.log("-> Đang theo dõi tiến trình hoàn tất đăng ký của GitHub (xử lý mạng chậm & onboarding)...");
+    const startTime = Date.now();
+    const maxWaitMs = 120000; // Chờ tối đa 2 phút cho mạng chậm / proxy lag
+
+    while (Date.now() - startTime < maxWaitMs) {
+      if (!page || page.isClosed()) break;
+
+      const currentUrl = page.url();
+      const bodyText = await this._bodyText(page);
+
+      // 1. Nếu bị chuyển về trang login
+      if (currentUrl.includes("/login") || bodyText.includes("Sign in to GitHub")) {
+        console.log("🔑 [GitHub Yêu cầu Login] Tự động đăng nhập xác thực phiên...");
+        await this._loginIfNeeded(page);
+        return true;
+      }
+
+      // 2. Nếu gặp trang Khảo sát / Onboarding / Customization (bấm Skip hoặc Continue)
+      const clickedAction = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll("button, a, input[type='submit']"));
+        for (const b of buttons) {
+          const txt = (b.innerText || b.textContent || b.value || "").trim().toLowerCase();
+          if (
+            txt.includes("skip personalization") ||
+            txt.includes("skip") ||
+            txt.includes("continue") ||
+            txt.includes("complete setup")
+          ) {
+            b.scrollIntoView({ behavior: "smooth", block: "center" });
+            b.click();
+            return txt;
+          }
+        }
+        return null;
+      }).catch(() => null);
+
+      if (clickedAction) {
+        console.log(`⚡ [Onboarding] Đã bấm nút: '${clickedAction}'`);
+        await this._safeSleep(3000);
+        continue;
+      }
+
+      // 3. Nếu đã vào Dashboard hoặc trang chính của tài khoản (đã xong khâu tạo tài khoản)
+      if (
+        bodyText.includes("Top repositories") ||
+        bodyText.includes("Welcome to GitHub") ||
+        bodyText.includes("Dashboard") ||
+        bodyText.includes("Recent activity") ||
+        currentUrl === "https://github.com/" ||
+        currentUrl === "https://github.com" ||
+        currentUrl.includes("github.com/dashboard")
+      ) {
+        console.log(`✅ [Hoàn tất Đăng ký] Đã vào Dashboard chính thành công (${currentUrl})!`);
+        return true;
+      }
+
+      // 4. Nếu vẫn còn trên account_verifications / verify_email / signup
+      await this._safeSleep(2000);
+    }
+    return true;
+  }
+
   // KÍCH HOẠT 2FA (enableTwoFactor mượt mà 100%, không reload đột ngột)
   async _enableTwoFactor(page) {
     console.log("\n🛡️ [enableTwoFactor] Truy cập Settings → Security → Bật 2FA...");
@@ -1253,26 +1317,8 @@ export class AiAgentRunner {
       await this._fillOtpDigits(this._githubPage, emailOtp);
       await this._safeSleep(1500);
 
-      // Chờ GitHub xác thực OTP và tự động chuyển trang (không reload)
-      console.log("-> Đang chờ GitHub xác nhận OTP và tự động chuyển tiếp...");
-      for (let i = 0; i < 20; i++) {
-        const url = this._githubPage.url();
-        const text = await this._bodyText(this._githubPage);
-
-        // Nếu GitHub tự động chuyển sang trang Login
-        if (url.includes("/login") || text.includes("Sign in to GitHub")) {
-          console.log("🔑 [GitHub Chuyển Tiếp] Tự động đăng nhập xác thực phiên...");
-          await this._loginIfNeeded(this._githubPage);
-          break;
-        }
-
-        // Nếu đã rời khỏi trang OTP/signup
-        if ((!url.includes("account_verifications") && !url.includes("signup") && !url.includes("verify_email")) || text.includes("Dashboard") || text.includes("Welcome to GitHub") || text.includes("Top repositories")) {
-          console.log(`✅ [Phiên Đăng Ký Sẵn Sàng] Đã chuyển tiếp thành công tới: ${url}`);
-          break;
-        }
-        await this._safeSleep(1500);
-      }
+      // Chờ GitHub xác thực OTP và xử lý onboarding / chuyển trang an toàn khi mạng chậm
+      await this._handlePostSignupFlow(this._githubPage);
       await this._safeSleep(3000);
 
       // 7. Bật 2FA trên GitHub (enableTwoFactor trực tiếp)
