@@ -25,7 +25,8 @@ export async function runFlow(configPath: string): Promise<void> {
       config.shardBrowserPath,
       config.debugPort || 9222,
       config.profileId,
-      config.userDataDir
+      config.userDataDir,
+      config.group || config.folder
     );
 
     const page = session.page;

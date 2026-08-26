@@ -1216,90 +1216,93 @@ export class AiAgentRunner {
         throw new Error("Không thể điền Password vào form đăng ký GitHub. Hủy lượt để thử lại an toàn!");
       }
 
-      console.log("-> 5. Cuộn trang và bấm nút 'Create account' để gửi form...");
-      await this._detectAndCloseOverlays(this._githubPage);
-      await this._smartScroll(this._githubPage, "down");
-      await this._safeSleep(1500);
+      console.log("-> 5. Gửi Form đăng ký và theo dõi chuyển sang trang xác thực OTP (Tự động click lại nếu kẹt)...");
+      
+      let isMovedToVerify = false;
+      const submitStartTime = Date.now();
+      const maxSubmitWaitMs = 60000; // 60s cho bước chuyển tiếp form
 
-      // Cách 1: Tìm bằng DOM evaluate và scroll + click
-      let clickedSubmit = await this._githubPage.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], [role='button']"));
-        // Ưu tiên 1: Nút có text "Create account"
-        const createBtn = buttons.find(b => {
-          const txt = (b.innerText || b.value || b.textContent || "").trim().toLowerCase();
-          return txt.includes("create account");
-        });
+      while (Date.now() - submitStartTime < maxSubmitWaitMs) {
+        if (!this._githubPage || this._githubPage.isClosed()) break;
 
-        if (createBtn) {
-          createBtn.scrollIntoView({ behavior: "smooth", block: "center" });
-          createBtn.removeAttribute("disabled");
-          createBtn.click();
-          return true;
+        const currentUrl = this._githubPage.url();
+        const hasOtpElement = await this._githubPage.evaluate(() => {
+          const bodyText = document.body ? document.body.innerText : "";
+          const hasOtpInput = !!document.querySelector("#launch-code-0, input[id^='launch-code'], [data-testid='otp-digit'], input[name='otp'], input[autocomplete='one-time-code']");
+          const isOtpMsg = bodyText.includes("Enter code") || bodyText.includes("Check your email") || bodyText.includes("We sent a launch code") || bodyText.includes("We sent a code to");
+          return hasOtpInput || isOtpMsg;
+        }).catch(() => false);
+
+        // Kiểm tra xem đã chính thức rời khỏi signup chưa
+        if (currentUrl.includes("account_verifications") || currentUrl.includes("verify_email") || currentUrl.includes("challenge") || hasOtpElement) {
+          isMovedToVerify = true;
+          console.log(`✅ [Submit Thành Công] Đã chuyển tiếp sang trang xác thực: ${currentUrl}`);
+          break;
         }
 
-        // Ưu tiên 2: Nút submit form đăng ký
-        const submitBtn = document.querySelector("form button[type='submit'], button[type='submit'], input[type='submit']");
-        if (submitBtn) {
-          const txt = (submitBtn.innerText || submitBtn.value || submitBtn.textContent || "").trim().toLowerCase();
-          if (!txt.includes("google") && !txt.includes("apple")) {
-            submitBtn.scrollIntoView({ behavior: "smooth", block: "center" });
-            submitBtn.removeAttribute("disabled");
-            submitBtn.click();
-            return true;
+        // Nếu vẫn còn kẹt ở trang signup -> Kích hoạt click lại 'Create account'
+        console.log(`⏳ [Kiểm Tra URL] Vẫn ở trang đăng ký (${currentUrl}). Tiến hành cuộn và click lại 'Create account'...`);
+        
+        await this._detectAndCloseOverlays(this._githubPage);
+        await this._smartScroll(this._githubPage, "down");
+        await this._safeSleep(600);
+
+        // 1. Thử click qua DOM evaluate
+        await this._githubPage.evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], [role='button']"));
+          const createBtn = buttons.find(b => {
+            const txt = (b.innerText || b.value || b.textContent || "").trim().toLowerCase();
+            return txt.includes("create account");
+          });
+          if (createBtn) {
+            createBtn.scrollIntoView({ behavior: "smooth", block: "center" });
+            createBtn.removeAttribute("disabled");
+            createBtn.click();
           }
-        }
-        return false;
-      }).catch(() => false);
+        }).catch(() => {});
 
-      // Cách 2: Tìm ElementHandle và click native qua Puppeteer
-      await this._safeSleep(1000);
-      try {
-        const allButtons = await this._githubPage.$$("button, input[type='submit']");
-        for (const btn of allButtons) {
-          const text = await this._githubPage.evaluate(el => (el.innerText || el.value || el.textContent || "").trim().toLowerCase(), btn);
-          if (text.includes("create account")) {
-            await btn.evaluate(el => el.scrollIntoView({ behavior: "smooth", block: "center" }));
-            await this._safeSleep(500);
-            await btn.click({ delay: 50 });
-            clickedSubmit = true;
-            break;
+        // 2. Thử click native Puppeteer
+        try {
+          const allButtons = await this._githubPage.$$("button, input[type='submit']");
+          for (const btn of allButtons) {
+            const text = await this._githubPage.evaluate(el => (el.innerText || el.value || el.textContent || "").trim().toLowerCase(), btn);
+            if (text.includes("create account")) {
+              await btn.evaluate(el => el.scrollIntoView({ behavior: "smooth", block: "center" }));
+              await btn.click({ delay: 50 });
+              break;
+            }
           }
-        }
-      } catch {}
+        } catch {}
 
-      // Cách 3: Nhấn Enter trên ô username nếu vẫn ở trang signup
-      await this._safeSleep(1500);
-      const stillOnSignup = this._githubPage.url().includes("signup");
-      if (stillOnSignup) {
-        console.log("-> Nhấn Enter để kích hoạt gửi Form đăng ký...");
+        // 3. Nhấn Enter trên toàn form
         await this._githubPage.keyboard.press("Enter");
+
+        // Chờ 5s để GitHub phản hồi trước khi kiểm tra lại vòng lặp
+        await this._safeSleep(5000);
       }
 
-      console.log(`-> Kết quả click Create account: ${clickedSubmit ? 'Đã click nút thành công' : 'Đang đợi chuyển trang'}`);
-      await this._safeSleep(2500);
-
       // 5. Chờ chuyển sang trang Nhập OTP (Hỗ trợ nếu có bước giải Captcha)
-      console.log("\n[Bước 4] Đang theo dõi trạng thái chuyển sang màn hình OTP (Nếu có Captcha, hãy hoàn tất giải trên trình duyệt)...");
+      console.log("\n[Bước 4] Đang theo dõi trạng thái màn hình OTP (Nếu có Captcha, hãy hoàn tất giải trên trình duyệt)...");
       let isOtpScreenReady = false;
-      const maxOtpWaitTime = 120000; // 2 phút
+      const maxOtpWaitTime = 90000; // 90s
       const otpWaitStart = Date.now();
 
       while (Date.now() - otpWaitStart < maxOtpWaitTime) {
         if (!this._githubPage || this._githubPage.isClosed()) break;
 
-        const checkStatus = await this._githubPage.evaluate(() => {
+        const currentUrl = this._githubPage.url();
+        const checkOtpReady = await this._githubPage.evaluate(() => {
           const url = window.location.href;
           const bodyText = document.body ? document.body.innerText : "";
           const hasOtpInput = !!document.querySelector("#launch-code-0, input[id^='launch-code'], [data-testid='otp-digit'], input[name='otp'], input[autocomplete='one-time-code']");
           const isOtpText = bodyText.includes("Enter code") || bodyText.includes("Check your email") || bodyText.includes("We sent a launch code") || bodyText.includes("We sent a code to");
-          const isVerifyUrl = url.includes("verify_email") || url.includes("account_verifications");
-
-          return hasOtpInput || isOtpText || isVerifyUrl;
+          
+          return hasOtpInput || isOtpText || url.includes("account_verifications") || url.includes("verify_email");
         }).catch(() => false);
 
-        if (checkStatus) {
+        if (checkOtpReady) {
           isOtpScreenReady = true;
-          console.log("✅ [OTP Ready] Đã chuyển sang màn hình nhập mã xác thực Email GitHub thành công!");
+          console.log(`✅ [OTP Ready] Đã sẵn sàng màn hình xác thực Email: ${currentUrl}`);
           break;
         }
 

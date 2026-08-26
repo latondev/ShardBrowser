@@ -14,16 +14,16 @@ interface ExtensionDetected {
 }
 
 export class ExtensionInspector {
-  private apiClient = new ShardBrowserApiClient();
-  private browser: Browser | null = null;
+  private _apiClient = new ShardBrowserApiClient();
+  private _browser: Browser | null = null;
 
   /**
    * Đọc danh sách Profile đang có trong ShardBrowser
    */
   async getProfiles(): Promise<any[]> {
-    const isApiHealthy = await this.apiClient.isHealthy();
+    const isApiHealthy = await this._apiClient.isHealthy();
     if (isApiHealthy) {
-      return await this.apiClient.listProfiles().catch(() => []);
+      return await this._apiClient.listProfiles().catch(() => []);
     }
     return [];
   }
@@ -110,8 +110,8 @@ export class ExtensionInspector {
   /**
    * Kết nối tới Profile đang chạy hoặc khởi chạy profile mới
    */
-  async connectToProfile(targetProfileId?: string): Promise<{ browser: Browser; profileId: string; profileName: string }> {
-    const isApiHealthy = await this.apiClient.isHealthy();
+  async connectToProfile(targetProfileId?: string, group: string = 'Veo3'): Promise<{ browser: Browser; profileId: string; profileName: string }> {
+    const isApiHealthy = await this._apiClient.isHealthy();
     const appData = process.env.APPDATA || '';
 
     // 1. Kiểm tra nếu có instance đang chạy sẵn
@@ -127,8 +127,8 @@ export class ExtensionInspector {
             const port = parseInt(lines[0], 10);
             if (!isNaN(port) && port > 0) {
               console.log(`🔌 Tìm thấy Profile [${pId}] đang mở ở cổng CDP ${port}. Đang kết nối...`);
-              this.browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}` });
-              return { browser: this.browser, profileId: pId, profileName: pId };
+              this._browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}` });
+              return { browser: this._browser, profileId: pId, profileName: pId };
             }
           } catch {}
         }
@@ -137,34 +137,42 @@ export class ExtensionInspector {
 
     // 2. Nếu chưa chạy, khởi chạy qua ShardBrowser Launcher API
     if (isApiHealthy) {
-      const profiles = await this.apiClient.listProfiles().catch(() => []);
+      let profiles = await this._apiClient.listProfiles().catch(() => []);
+      
+      // Ưu tiên lọc theo group
+      if (group && !targetProfileId) {
+        const normalizedGroup = group.trim().toLowerCase();
+        const filtered = profiles.filter(p => (p.folder || '').trim().toLowerCase() === normalizedGroup);
+        if (filtered.length > 0) profiles = filtered;
+      }
+
       let prof = targetProfileId 
         ? profiles.find(p => p.id === targetProfileId) 
         : profiles[0];
 
       if (!prof && profiles.length === 0) {
-        prof = await this.apiClient.createProfile('Test-AutoFlow-Profile');
+        prof = await this._apiClient.createProfile('Test-AutoFlow-Profile', group);
       }
 
       if (prof) {
-        console.log(`🚀 Khởi chạy Profile: "${prof.name}" (${prof.id})...`);
-        const startRes = await this.apiClient.startProfile(prof.id, false);
+        console.log(`🚀 Khởi chạy Profile: "${prof.name}" (${prof.id}) [Group: ${prof.folder || 'None'}]...`);
+        const startRes = await this._apiClient.startProfile(prof.id, false);
         const cdpTarget = startRes.cdp?.ws 
           || (startRes.cdp?.port ? `http://127.0.0.1:${startRes.cdp.port}` : 'http://127.0.0.1:9222');
 
         console.log(`🔌 Đang kết nối CDP: ${cdpTarget}`);
         await new Promise(r => setTimeout(r, 2500));
         
-        this.browser = await puppeteer.connect(
+        this._browser = await puppeteer.connect(
           cdpTarget.startsWith('http') ? { browserURL: cdpTarget } : { browserWSEndpoint: cdpTarget }
         );
-        return { browser: this.browser, profileId: prof.id, profileName: prof.name };
+        return { browser: this._browser, profileId: prof.id, profileName: prof.name };
       }
     }
 
     // Fallback: kết nối 9222
-    this.browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9222' });
-    return { browser: this.browser, profileId: 'unknown', profileName: 'Direct 9222' };
+    this._browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9222' });
+    return { browser: this._browser, profileId: 'unknown', profileName: 'Direct 9222' };
   }
 
   /**

@@ -6,6 +6,7 @@ import { logger } from './logger';
 
 export interface FullAutoOptions {
   profileIds?: string[];
+  group?: string;
   mode?: 'Văn bản thành video' | 'Văn bản thành hình ảnh' | 'Khung hình thành video' | 'Tự động hóa Agent';
   prompts?: string[];
   autoCloseProfileAfterRun?: boolean;
@@ -13,17 +14,17 @@ export interface FullAutoOptions {
 }
 
 export class FullAutoRunner {
-  private apiClient = new ShardBrowserApiClient();
+  private _apiClient = new ShardBrowserApiClient();
 
   /**
    * Lấy danh sách toàn bộ profile từ ShardBrowser Launcher
    */
   async getAllProfiles(): Promise<ProfileMeta[]> {
-    const isHealthy = await this.apiClient.isHealthy();
+    const isHealthy = await this._apiClient.isHealthy();
     if (!isHealthy) {
       throw new Error('ShardBrowser Launcher API chưa bật hoặc không phản hồi.');
     }
-    return await this.apiClient.listProfiles();
+    return await this._apiClient.listProfiles();
   }
 
   /**
@@ -56,7 +57,7 @@ export class FullAutoRunner {
       // 2. Nếu chưa chạy, bật Profile qua ShardBrowser Launcher API
       if (!cdpTarget) {
         console.log(`⚡ 1. Khởi chạy Profile qua Launcher API...`);
-        const startRes = await this.apiClient.startProfile(profile.id, false).catch(() => null);
+        const startRes = await this._apiClient.startProfile(profile.id, false).catch(() => null);
         if (startRes && startRes.cdp?.port) {
           cdpTarget = startRes.cdp.ws || `http://127.0.0.1:${startRes.cdp.port}`;
         }
@@ -197,7 +198,7 @@ export class FullAutoRunner {
         console.log(`⏳ Đợi 5 giây để luồng render bắt đầu trước khi đóng profile...`);
         await new Promise(r => setTimeout(r, 5000));
         await browser.disconnect().catch(() => {});
-        await this.apiClient.stopProfile(profile.id).catch(() => {});
+        await this._apiClient.stopProfile(profile.id).catch(() => {});
         console.log(`🛑 Đã đóng profile [${profile.name}] thành công.`);
       }
 
@@ -210,7 +211,7 @@ export class FullAutoRunner {
   }
 
   /**
-   * Chạy Full Auto tuần tự qua danh sách toàn bộ Profile
+   * Chạy Full Auto tuần tự qua danh sách Profile (hỗ trợ lọc Group)
    */
   async runAll(options: FullAutoOptions): Promise<void> {
     const allProfiles = await this.getAllProfiles();
@@ -220,8 +221,22 @@ export class FullAutoRunner {
     }
 
     let targetProfiles = allProfiles;
+
+    // Lọc theo Group / Folder nếu được chỉ định
+    if (options.group) {
+      const groupNormalized = options.group.trim().toLowerCase();
+      targetProfiles = targetProfiles.filter(p => (p.folder || '').trim().toLowerCase() === groupNormalized);
+      console.log(`📁 Đã lọc theo Group: "${options.group}" -> Tìm thấy ${targetProfiles.length} profile.`);
+    }
+
+    // Lọc theo danh sách profileIds cụ thể nếu có
     if (options.profileIds && options.profileIds.length > 0) {
-      targetProfiles = allProfiles.filter(p => options.profileIds!.includes(p.id));
+      targetProfiles = targetProfiles.filter(p => options.profileIds!.includes(p.id));
+    }
+
+    if (targetProfiles.length === 0) {
+      console.log(`⚠️ Không có Profile nào thỏa mãn điều kiện lọc.`);
+      return;
     }
 
     console.log(`\n============================================================`);
@@ -230,7 +245,7 @@ export class FullAutoRunner {
 
     let successCount = 0;
     for (const [index, profile] of targetProfiles.entries()) {
-      console.log(`\n[TIẾN ĐỘ: ${index + 1} / ${targetProfiles.length}]`);
+      console.log(`\n[TIẾN ĐỘ: ${index + 1} / ${targetProfiles.length}] (Group: ${profile.folder || 'Chưa phân nhóm'})`);
       const ok = await this.runSingleProfile(profile, options);
       if (ok) successCount++;
 
@@ -252,10 +267,16 @@ async function main() {
     const args = process.argv.slice(2);
     const isAll = args.includes('--all');
     const autoClose = args.includes('--auto-close');
-    const specificProfileId = args.find(a => !a.startsWith('--'));
+    
+    // Parse --group <name>
+    const groupArgIdx = args.indexOf('--group');
+    const groupName = groupArgIdx !== -1 && args[groupArgIdx + 1] ? args[groupArgIdx + 1] : undefined;
+
+    const specificProfileId = args.find((a, i) => !a.startsWith('--') && (i === 0 || args[i - 1] !== '--group'));
 
     const options: FullAutoOptions = {
       mode: 'Văn bản thành video',
+      group: groupName,
       prompts: [
         'Một chú mèo phi hành gia bay lơ lửng trong vũ trụ, ánh sáng neon tím và xanh lam, 8k cinematic, siêu chi tiết'
       ],
@@ -265,8 +286,8 @@ async function main() {
 
     if (specificProfileId) {
       options.profileIds = [specificProfileId];
-    } else if (!isAll) {
-      // Mặc định chạy 1 profile đầu tiên nếu không có cờ --all
+    } else if (!isAll && !groupName) {
+      // Mặc định chạy 1 profile đầu tiên nếu không có cờ --all hoặc --group
       const profiles = await runner.getAllProfiles();
       if (profiles.length > 0) {
         options.profileIds = [profiles[0].id];

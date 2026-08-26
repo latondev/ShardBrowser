@@ -13,6 +13,8 @@ export interface ShardSettings {
 export interface ProfileMeta {
   id: string;
   name: string;
+  folder?: string;
+  notes?: string;
   running?: boolean;
   cdp?: {
     port: number;
@@ -56,14 +58,14 @@ export function generateJwt(secret: string, ttlSeconds: number = 3600): string {
 }
 
 export class ShardBrowserApiClient {
-  private port: number = 40325;
-  private secret: string = '';
+  private _port: number = 40325;
+  private _secret: string = '';
 
   constructor() {
-    this.loadSettings();
+    this._loadSettings();
   }
 
-  private loadSettings(): void {
+  private _loadSettings(): void {
     const appData = process.env.APPDATA || '';
     if (!appData) return;
 
@@ -72,20 +74,20 @@ export class ShardBrowserApiClient {
       try {
         const raw = fs.readFileSync(settingsPath, 'utf-8');
         const settings: ShardSettings = JSON.parse(raw);
-        if (settings.api_port) this.port = settings.api_port;
-        if (settings.api_secret) this.secret = settings.api_secret;
+        if (settings.api_port) this._port = settings.api_port;
+        if (settings.api_secret) this._secret = settings.api_secret;
       } catch (e: any) {
         logger.debug(`Failed to read shardx settings: ${e.message}`);
       }
     }
   }
 
-  private async request<T = any>(
+  private async _request<T = any>(
     method: 'GET' | 'POST' | 'DELETE' | 'PATCH',
     endpoint: string,
     body?: any
   ): Promise<T> {
-    const token = this.secret ? generateJwt(this.secret) : '';
+    const token = this._secret ? generateJwt(this._secret) : '';
 
     return new Promise((resolve, reject) => {
       const payload = body ? JSON.stringify(body) : undefined;
@@ -103,7 +105,7 @@ export class ShardBrowserApiClient {
       const req = http.request(
         {
           hostname: '127.0.0.1',
-          port: this.port,
+          port: this._port,
           path: endpoint,
           method,
           headers,
@@ -143,7 +145,7 @@ export class ShardBrowserApiClient {
 
   async isHealthy(): Promise<boolean> {
     try {
-      const res = await this.request<{ ok: boolean }>('GET', '/health');
+      const res = await this._request<{ ok: boolean }>('GET', '/health');
       return res && res.ok === true;
     } catch {
       return false;
@@ -151,35 +153,42 @@ export class ShardBrowserApiClient {
   }
 
   async listProfiles(): Promise<ProfileMeta[]> {
-    return await this.request<ProfileMeta[]>('GET', '/profiles');
+    return await this._request<ProfileMeta[]>('GET', '/profiles');
+  }
+
+  async listProfilesByGroup(groupNameValue: string): Promise<ProfileMeta[]> {
+    const profiles = await this.listProfiles();
+    const normalized = groupNameValue.trim().toLowerCase();
+    return profiles.filter((p) => (p.folder || '').trim().toLowerCase() === normalized);
   }
 
   async getNewFingerprint(): Promise<any> {
-    const res = await this.request<{ fingerprint: any }>('GET', '/fingerprint/new');
+    const res = await this._request<{ fingerprint: any }>('GET', '/fingerprint/new');
     return res.fingerprint;
   }
 
-  async createProfile(name: string = 'AutoFlow Profile'): Promise<ProfileMeta> {
+  async createProfile(nameValue: string = 'AutoFlow Profile', folderValue: string = 'Veo3'): Promise<ProfileMeta> {
     const fingerprint = await this.getNewFingerprint();
-    return await this.request<ProfileMeta>('POST', '/profiles', {
-      name,
+    return await this._request<ProfileMeta>('POST', '/profiles', {
+      name: nameValue,
+      folder: folderValue,
       fingerprint
     });
   }
 
-  async createTemporaryProfile(name: string = 'AutoFlow Temp Profile'): Promise<ProfileMeta> {
-    return await this.request<ProfileMeta>('POST', '/profiles/temporary', { name });
+  async createTemporaryProfile(nameValue: string = 'AutoFlow Temp Profile'): Promise<ProfileMeta> {
+    return await this._request<ProfileMeta>('POST', '/profiles/temporary', { name: nameValue });
   }
 
-  async startProfile(profileId: string, headless: boolean = false): Promise<StartProfileResult> {
-    return await this.request<StartProfileResult>('POST', `/profiles/${profileId}/start`, { headless });
+  async startProfile(profileIdValue: string, headlessValue: boolean = false): Promise<StartProfileResult> {
+    return await this._request<StartProfileResult>('POST', `/profiles/${profileIdValue}/start`, { headless: headlessValue });
   }
 
-  async stopProfile(profileId: string): Promise<void> {
+  async stopProfile(profileIdValue: string): Promise<void> {
     try {
-      await this.request('POST', `/profiles/${profileId}/stop`);
+      await this._request('POST', `/profiles/${profileIdValue}/stop`);
     } catch (e: any) {
-      logger.warn(`Failed to stop profile ${profileId}: ${e.message}`);
+      logger.warn(`Failed to stop profile ${profileIdValue}: ${e.message}`);
     }
   }
 }

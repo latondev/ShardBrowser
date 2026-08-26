@@ -81,58 +81,73 @@ function findActiveShardBrowserInstance(profileId?: string): { port: number; wsP
 import { ShardBrowserApiClient } from './shard-api';
 
 export class BrowserManager {
-  private browser: any;
-  private page: any;
-  private cdpUrl: string = '';
-  private apiClient: ShardBrowserApiClient = new ShardBrowserApiClient();
-  private startedProfileId?: string;
+  private _browser: any;
+  private _page: any;
+  private _cdpUrl: string = '';
+  private _apiClient: ShardBrowserApiClient = new ShardBrowserApiClient();
+  private _startedProfileId?: string;
 
   async launch(
     extensionPath: string,
     shardBrowserPath?: string,
     debugPort: number = 9222,
     profileId?: string,
-    customUserDataDir?: string
+    customUserDataDir?: string,
+    group?: string
   ): Promise<BrowserSession> {
     if (extensionPath && !fs.existsSync(extensionPath)) {
       logger.warn(`Extension path not found: ${extensionPath}`);
     }
 
     // 1. Check if ShardBrowser Launcher API is running (Tauri app)
-    const isApiHealthy = await this.apiClient.isHealthy();
+    const isApiHealthy = await this._apiClient.isHealthy();
     if (isApiHealthy) {
       logger.info('Detected ShardBrowser Launcher Automation API.');
       try {
         let targetProfileId = profileId?.trim();
         
-        const existingProfiles = await this.apiClient.listProfiles().catch(() => []);
+        let existingProfiles = await this._apiClient.listProfiles().catch(() => []);
         
+        // Filter by group if specified
+        if (group && !targetProfileId) {
+          const normalizedGroup = group.trim().toLowerCase();
+          const filtered = existingProfiles.filter((p) => (p.folder || '').trim().toLowerCase() === normalizedGroup);
+          if (filtered.length > 0) {
+            existingProfiles = filtered;
+            logger.info(`Filtered profiles by group "${group}": found ${filtered.length} profile(s).`);
+          } else {
+            logger.info(`No existing profile in group "${group}", will create one.`);
+            existingProfiles = [];
+          }
+        }
+
         // If no profileId specified, check if there's any existing profile or create a permanent one
         if (!targetProfileId) {
           const running = existingProfiles.find((p) => p.running && p.cdp?.port);
           if (running && running.cdp && (await isPortOpen(running.cdp.port))) {
             targetProfileId = running.id;
-            logger.info(`Using active running ShardBrowser profile: "${running.name}" (${running.id})`);
+            logger.info(`Using active running ShardBrowser profile: "${running.name}" (${running.id}) [Group: ${running.folder || 'None'}]`);
             const cdpTarget = running.cdp.ws || `http://127.0.0.1:${running.cdp.port}`;
             return await this.connect(cdpTarget);
           } else if (existingProfiles.length > 0) {
             targetProfileId = existingProfiles[0].id;
-            logger.info(`Using ShardBrowser profile: "${existingProfiles[0].name}" (${targetProfileId})`);
+            logger.info(`Using ShardBrowser profile: "${existingProfiles[0].name}" (${targetProfileId}) [Group: ${existingProfiles[0].folder || 'None'}]`);
           } else {
-            logger.info('Creating a new persistent profile in ShardBrowser...');
-            const newProf = await this.apiClient.createProfile(`AutoFlow Profile`);
+            const groupName = group || 'Veo3';
+            logger.info(`Creating a new persistent profile in group "${groupName}" in ShardBrowser...`);
+            const newProf = await this._apiClient.createProfile(`AutoFlow Profile`, groupName);
             targetProfileId = newProf.id;
-            logger.info(`Created ShardBrowser profile: "${newProf.name}" (${targetProfileId})`);
+            logger.info(`Created ShardBrowser profile: "${newProf.name}" (${targetProfileId}) [Group: ${groupName}]`);
           }
         }
 
-        this.startedProfileId = targetProfileId;
+        this._startedProfileId = targetProfileId;
         logger.info(`Starting ShardBrowser profile [${targetProfileId}] via Launcher API...`);
         // If it was in a stale running state, stop first
-        await this.apiClient.stopProfile(targetProfileId).catch(() => {});
+        await this._apiClient.stopProfile(targetProfileId).catch(() => {});
         await new Promise((r) => setTimeout(r, 600));
 
-        const startResult = await this.apiClient.startProfile(targetProfileId, false);
+        const startResult = await this._apiClient.startProfile(targetProfileId, false);
         
         const cdpTarget = startResult.cdp?.ws
           ? startResult.cdp.ws
@@ -208,22 +223,22 @@ export class BrowserManager {
       logger.info('Launching Puppeteer bundled browser');
     }
 
-    this.browser = await puppeteer.launch({
+    this._browser = await puppeteer.launch({
       executablePath,
       args,
       headless: false,
       timeout: 30000
     });
 
-    const pages = await this.browser.pages();
-    this.page = pages[0] || await this.browser.newPage();
-    this.cdpUrl = this.browser.wsEndpoint();
+    const pages = await this._browser.pages();
+    this._page = pages[0] || await this._browser.newPage();
+    this._cdpUrl = this._browser.wsEndpoint();
 
-    logger.info(`ShardBrowser launched successfully, CDP: ${this.cdpUrl}`);
+    logger.info(`ShardBrowser launched successfully, CDP: ${this._cdpUrl}`);
     return {
-      browser: this.browser,
-      page: this.page,
-      cdpUrl: this.cdpUrl
+      browser: this._browser,
+      page: this._page,
+      cdpUrl: this._cdpUrl
     };
   }
 
@@ -233,15 +248,15 @@ export class BrowserManager {
         ? { browserURL: cdpUrl }
         : { browserWSEndpoint: cdpUrl };
 
-      this.browser = await puppeteer.connect(connectOptions);
-      const pages = await this.browser.pages();
-      this.page = pages[0] || await this.browser.newPage();
-      this.cdpUrl = this.browser.wsEndpoint ? this.browser.wsEndpoint() : cdpUrl;
+      this._browser = await puppeteer.connect(connectOptions);
+      const pages = await this._browser.pages();
+      this._page = pages[0] || await this._browser.newPage();
+      this._cdpUrl = this._browser.wsEndpoint ? this._browser.wsEndpoint() : cdpUrl;
       logger.info(`Connected to existing ShardBrowser instance at ${cdpUrl}`);
       return {
-        browser: this.browser,
-        page: this.page,
-        cdpUrl: this.cdpUrl
+        browser: this._browser,
+        page: this._page,
+        cdpUrl: this._cdpUrl
       };
     } catch (error: any) {
       throw new ConnectionError(`Failed to connect to browser: ${error.message}`);
@@ -249,17 +264,17 @@ export class BrowserManager {
   }
 
   async close(): Promise<void> {
-    if (this.browser) {
-      await this.browser.close().catch(() => {});
+    if (this._browser) {
+      await this._browser.close().catch(() => {});
       logger.info('Browser connection closed');
     }
-    if (this.startedProfileId) {
-      await this.apiClient.stopProfile(this.startedProfileId);
-      logger.info(`Stopped profile [${this.startedProfileId}] via Launcher API`);
+    if (this._startedProfileId) {
+      await this._apiClient.stopProfile(this._startedProfileId);
+      logger.info(`Stopped profile [${this._startedProfileId}] via Launcher API`);
     }
   }
 
   getPage(): any {
-    return this.page;
+    return this._page;
   }
 }

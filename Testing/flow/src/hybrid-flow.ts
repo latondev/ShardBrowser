@@ -5,19 +5,20 @@ import { ShardBrowserApiClient } from './shard-api';
 
 export interface HybridFlowOptions {
   profileId?: string;
+  group?: string;
   mode?: 'Văn bản thành video' | 'Văn bản thành hình ảnh' | 'Khung hình thành video' | 'Tự động hóa Agent';
   prompts?: string[];
   autoRun?: boolean;
 }
 
 export class HybridFlowController {
-  private apiClient = new ShardBrowserApiClient();
-  private browser: Browser | null = null;
-  private flowPage: Page | null = null;
-  private sidePanelPage: Page | null = null;
+  private _apiClient = new ShardBrowserApiClient();
+  private _browser: Browser | null = null;
+  private _flowPage: Page | null = null;
+  private _sidePanelPage: Page | null = null;
 
-  async connectOrLaunch(rawProfileId?: string): Promise<{ browser: Browser; profileId: string }> {
-    const isApiHealthy = await this.apiClient.isHealthy();
+  async connectOrLaunch(rawProfileId?: string, group?: string): Promise<{ browser: Browser; profileId: string }> {
+    const isApiHealthy = await this._apiClient.isHealthy();
     const appData = process.env.APPDATA || '';
     const profileId = (rawProfileId && !rawProfileId.startsWith('--')) ? rawProfileId.trim() : undefined;
 
@@ -34,8 +35,8 @@ export class HybridFlowController {
             const port = parseInt(lines[0], 10);
             if (!isNaN(port) && port > 0) {
               console.log(`🔌 Kết nối tới ShardBrowser Profile [${pId}] tại cổng CDP ${port}...`);
-              this.browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}` });
-              return { browser: this.browser, profileId: pId };
+              this._browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}` });
+              return { browser: this._browser, profileId: pId };
             }
           } catch {}
         }
@@ -44,45 +45,56 @@ export class HybridFlowController {
 
     // 2. Khởi chạy qua API nếu chưa có instance
     if (isApiHealthy) {
-      const profiles = await this.apiClient.listProfiles().catch(() => []);
+      let profiles = await this._apiClient.listProfiles().catch(() => []);
+      
+      // Lọc theo group nếu có
+      if (group && !profileId) {
+        const normalizedGroup = group.trim().toLowerCase();
+        const filtered = profiles.filter(p => (p.folder || '').trim().toLowerCase() === normalizedGroup);
+        if (filtered.length > 0) {
+          profiles = filtered;
+          console.log(`📁 Đã lọc profile theo Group "${group}" (tìm thấy ${filtered.length} profile)`);
+        }
+      }
+
       const targetProf = (profileId ? profiles.find(p => p.id === profileId) : null) || profiles.find(p => p.running) || profiles[0];
       if (targetProf) {
-        console.log(`🚀 Khởi chạy profile: "${targetProf.name}" (${targetProf.id})...`);
-        const startRes = await this.apiClient.startProfile(targetProf.id, false);
+        console.log(`🚀 Khởi chạy profile: "${targetProf.name}" (${targetProf.id}) [Group: ${targetProf.folder || 'None'}]...`);
+        const startRes = await this._apiClient.startProfile(targetProf.id, false);
         const cdpTarget = startRes.cdp?.ws || (startRes.cdp?.port ? `http://127.0.0.1:${startRes.cdp.port}` : 'http://127.0.0.1:9222');
         await new Promise(r => setTimeout(r, 2500));
-        this.browser = await puppeteer.connect(
+        this._browser = await puppeteer.connect(
           cdpTarget.startsWith('http') ? { browserURL: cdpTarget } : { browserWSEndpoint: cdpTarget }
         );
-        return { browser: this.browser, profileId: targetProf.id };
+        return { browser: this._browser, profileId: targetProf.id };
       }
     }
 
     // Fallback
     console.log('🔌 Kết nối tới cổng CDP mặc định 9222...');
-    this.browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9222' });
-    return { browser: this.browser, profileId: 'default' };
+    this._browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9222' });
+    return { browser: this._browser, profileId: 'default' };
   }
 
   /**
    * Mở hoặc chuyển tab Google Flow
    */
   async ensureGoogleFlowTab(): Promise<Page> {
-    if (!this.browser) throw new Error('Browser chưa kết nối');
+    if (!this._browser) throw new Error('Browser chưa kết nối');
 
-    const pages = await this.browser.pages();
+    const pages = await this._browser.pages();
     let flowTab = pages.find(p => p.url().includes('labs.google/fx'));
 
     if (!flowTab) {
       console.log('🌐 Đang mở trang Google Flow: https://labs.google/fx/vi/tools/flow');
-      flowTab = await this.browser.newPage();
+      flowTab = await this._browser.newPage();
       await flowTab.goto('https://labs.google/fx/vi/tools/flow', { waitUntil: 'domcontentloaded' });
     } else {
       console.log(`🌐 Tìm thấy tab Google Flow sẵn có: ${flowTab.url()}`);
       await flowTab.bringToFront().catch(() => {});
     }
 
-    this.flowPage = flowTab;
+    this._flowPage = flowTab;
     return flowTab;
   }
 
@@ -90,11 +102,11 @@ export class HybridFlowController {
    * Lắng nghe và bắt lấy Target Side Panel của Extension
    */
   async waitForSidePanel(timeoutSeconds: number = 60): Promise<Page> {
-    if (!this.browser) throw new Error('Browser chưa kết nối');
+    if (!this._browser) throw new Error('Browser chưa kết nối');
 
     // Kiểm tra xem Side Panel đã mở sẵn chưa
     const checkTargets = async () => {
-      const targets = await this.browser!.targets();
+      const targets = await this._browser!.targets();
       return targets.find(t => t.url().includes('src/ui/side-panel/index.html'));
     };
 
@@ -102,7 +114,7 @@ export class HybridFlowController {
     if (existingTarget) {
       const page = await existingTarget.page();
       if (page) {
-        this.sidePanelPage = page;
+        this._sidePanelPage = page;
         return page;
       }
     }
@@ -120,7 +132,7 @@ export class HybridFlowController {
         const page = await target.page();
         if (page) {
           console.log('🎉 ĐÃ PHÁT HIỆN KHUNG SIDE PANEL CỦA EXTENSION!');
-          this.sidePanelPage = page;
+          this._sidePanelPage = page;
           return page;
         }
       }
@@ -134,9 +146,9 @@ export class HybridFlowController {
    * Tự động điều khiển Side Panel: tắt popup, chọn mode, điền prompt, bấm chạy
    */
   async configureAndRunExtension(options: HybridFlowOptions): Promise<void> {
-    if (!this.sidePanelPage) throw new Error('Side Panel page chưa sẵn sàng.');
+    if (!this._sidePanelPage) throw new Error('Side Panel page chưa sẵn sàng.');
 
-    const page = this.sidePanelPage;
+    const page = this._sidePanelPage;
     console.log('\n⚙️ [TIẾN HÀNH TỰ ĐỘNG ĐIỀU KHIỂN EXTENSION]...');
 
     // 1. Tự động đóng modal cảnh báo / hướng dẫn nếu có (Ví dụ "Tôi hiểu rồi", "Đóng")
@@ -243,14 +255,20 @@ async function main() {
   try {
     const args = process.argv.slice(2);
     const shouldRun = args.includes('--run');
-    const profileArg = args.find(a => !a.startsWith('--'));
+    
+    // Parse --group <name>
+    const groupArgIdx = args.indexOf('--group');
+    const groupName = groupArgIdx !== -1 && args[groupArgIdx + 1] ? args[groupArgIdx + 1] : 'Veo3';
+
+    const profileArg = args.find((a, i) => !a.startsWith('--') && (i === 0 || args[i - 1] !== '--group'));
 
     console.log('\n🌟 KHỞI CHẠY QUY TRÌNH BÁN TỰ ĐỘNG FLOW AUTOMATION 🌟\n');
-    await controller.connectOrLaunch(profileArg);
+    await controller.connectOrLaunch(profileArg, groupName);
     await controller.ensureGoogleFlowTab();
     await controller.waitForSidePanel(60);
 
     await controller.configureAndRunExtension({
+      group: groupName,
       mode: 'Văn bản thành video',
       prompts: [
         'Một chú mèo phi hành gia bay lơ lửng trong vũ trụ, ánh sáng neon tím và xanh lam, 8k cinematic, siêu chi tiết'

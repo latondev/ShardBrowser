@@ -33,6 +33,8 @@ export interface TestConfig {
   };
   timeout: number;
   extensionPath: string;
+  group?: string;
+  folder?: string;
   profileId?: string;
   userDataDir?: string;
   shardBrowserPath?: string;

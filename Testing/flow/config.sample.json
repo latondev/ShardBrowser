@@ -23,6 +23,7 @@
   },
   "timeout": 60,
   "extensionPath": "F:\\ToolAllvideo\\Extension\\flow-automation-auto-flow",
+  "group": "Veo3",
   "profileId": "",
   "userDataDir": "",
   "keepOpen": true,
