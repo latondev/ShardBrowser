@@ -649,10 +649,13 @@ export class AiAgentRunner {
     await page.goto("https://github.com/settings/two_factor_authentication/setup/intro", { waitUntil: "domcontentloaded", timeout: 60000 });
     await this._safeSleep(3000);
 
-    // Kiểm tra nếu bị đẩy về login
-    if (page.url().includes("/login") || (await this._bodyText(page)).includes("Sign in to GitHub")) {
+    // Kiểm tra nếu bị đẩy về login hoặc trang session
+    if (page.url().includes("/login") || page.url().includes("/session") || (await this._bodyText(page)).includes("Sign in to GitHub")) {
       await this._loginIfNeeded(page);
       await this._safeSleep(2500);
+      // Mở lại trang setup intro sau khi đăng nhập xong
+      await page.goto("https://github.com/settings/two_factor_authentication/setup/intro", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await this._safeSleep(3000);
     }
 
     // Bấm Continue hoặc Set up using an app
@@ -670,7 +673,11 @@ export class AiAgentRunner {
     }).catch(() => false);
     await this._safeSleep(2500);
 
-    // 5. Lấy Setup Key
+    // 5. Lấy Setup Key (nếu trang chưa ở đúng màn hình setup thì tự động điều hướng lại)
+    if (page.url().includes("/session") || page.url().includes("/login")) {
+      await page.goto("https://github.com/settings/two_factor_authentication/setup/intro", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await this._safeSleep(2500);
+    }
     const setupKey = await this._extractSetupKey(page);
 
     // 6. Sinh mã TOTP bằng TotpClient (0ms Offline)
