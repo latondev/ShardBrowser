@@ -11,6 +11,11 @@ import axios from "axios";
 import fs from "fs";
 import path from "path";
 
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 // ANSI Color Codes
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
@@ -25,7 +30,13 @@ export class RapidApiQuotaChecker {
   _keys = [];
 
   constructor(filePath) {
-    this._filePath = filePath || path.join(process.cwd(), "Testing", "git", "rapidapikey.md");
+    if (filePath) {
+      this._filePath = filePath;
+    } else {
+      const localPath = path.join(__dirname, "rapidapikey.md");
+      const rootPath = path.join(process.cwd(), "Testing", "git", "rapidapikey.md");
+      this._filePath = fs.existsSync(localPath) ? localPath : rootPath;
+    }
   }
 
   // Đọc danh sách key từ file
