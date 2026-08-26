@@ -894,10 +894,11 @@ export class AiAgentRunner {
       console.log("🛡️ [Fingerprint Isolation] Đang sinh Fingerprint Windows đồng nhất (Canvas/WebGL/Audio Noise)...");
       const { data: fpRes } = await axios.get(`${this._launcherApiUrl}/fingerprint/new/windows`, { headers: this._headers, timeout: 4000 });
       
-      // BƯỚC 3: TẠO PROFILE MỚI
+      // BƯỚC 3: TẠO PROFILE MỚI THUỘC NHÓM 'GitHub-Auto'
       const sessionSuffix = Date.now().toString().slice(-4);
       const profilePayload = {
         name: `SHARDX-AUTO-${sessionSuffix}`,
+        folder: "GitHub-Auto",
         notes: `Tách biệt hoàn toàn | Proxy: ${chosenProxy ? chosenProxy.proxyString || `${chosenProxy.host}:${chosenProxy.port}` : 'Direct'} | Time: ${new Date().toLocaleTimeString()}`,
         proxy: chosenProxy ? (chosenProxy.proxyString || `http://${chosenProxy.host}:${chosenProxy.port}`) : null,
         proxy_id: chosenProxy?.id || null,
@@ -907,7 +908,7 @@ export class AiAgentRunner {
       const { data: createdProfile } = await axios.post(`${this._launcherApiUrl}/profiles`, profilePayload, { headers: this._headers });
       this._profileId = createdProfile.id;
       this._isCreatedProfile = true;
-      console.log(`✨ [Profile Created] Tạo thành công Profile tách biệt ID: ${this._profileId} ('${profilePayload.name}')`);
+      console.log(`✨ [Profile Created] Tạo thành công Profile nhóm [GitHub-Auto] ID: ${this._profileId} ('${profilePayload.name}')`);
 
       // BƯỚC 4: KHỞI CHẠY PROFILE VÀ KẾT NỐI CDP
       console.log(`🚀 [Browser Launch] Khởi chạy Profile '${profilePayload.name}' qua ShardX CDP...`);
@@ -936,19 +937,23 @@ export class AiAgentRunner {
     throw new Error("Không tìm thấy kết nối trình duyệt. Hãy bật ShardX Launcher hoặc khởi chạy Chrome với --remote-debugging-port=9222.");
   }
 
-  // Xóa toàn bộ profile cũ trong ShardBrowser
+  // Chỉ xóa toàn bộ profile cũ thuộc nhóm 'GitHub-Auto' trong ShardBrowser (bảo vệ các profile khác)
   async _deleteAllOldProfiles() {
     try {
       const { data: profiles } = await axios.get(`${this._launcherApiUrl}/profiles`, { headers: this._headers, timeout: 5000 });
       if (Array.isArray(profiles) && profiles.length > 0) {
-        console.log(`🧹 [Profile Cleanup] Phát hiện ${profiles.length} profiles cũ, đang xóa sạch...`);
-        for (const prof of profiles) {
-          try {
-            await axios.post(`${this._launcherApiUrl}/profiles/${prof.id}/stop`, {}, { headers: this._headers, timeout: 3000 }).catch(() => {});
-            await axios.delete(`${this._launcherApiUrl}/profiles/${prof.id}`, { headers: this._headers, timeout: 3000 }).catch(() => {});
-          } catch {}
+        // Chỉ lọc profile thuộc nhóm 'GitHub-Auto' hoặc tên 'SHARDX-AUTO-' để xóa
+        const targetProfiles = profiles.filter(p => p.folder === "GitHub-Auto" || p.name?.startsWith("SHARDX-AUTO-"));
+        if (targetProfiles.length > 0) {
+          console.log(`🧹 [Profile Cleanup] Phát hiện ${targetProfiles.length} profiles thuộc nhóm [GitHub-Auto], đang dọn dẹp...`);
+          for (const prof of targetProfiles) {
+            try {
+              await axios.post(`${this._launcherApiUrl}/profiles/${prof.id}/stop`, {}, { headers: this._headers, timeout: 3000 }).catch(() => {});
+              await axios.delete(`${this._launcherApiUrl}/profiles/${prof.id}`, { headers: this._headers, timeout: 3000 }).catch(() => {});
+            } catch {}
+          }
+          console.log(`✅ [Profile Cleanup] Đã xóa sạch toàn bộ profiles nhóm [GitHub-Auto].`);
         }
-        console.log(`✅ [Profile Cleanup] Đã xóa sạch toàn bộ profiles cũ.`);
       }
     } catch {}
   }
