@@ -28,10 +28,10 @@ export class FormFiller {
       const isSet = await this.page.evaluate((targetMode: string) => {
         const buttons = Array.from(document.querySelectorAll('button, [role="tab"], div[type="button"]'));
         const modeKeywords: Record<string, string[]> = {
-          'text-to-video': ['video', 'văn bản thành video', 'text to video'],
+          'text-to-video': ['văn bản thành video', 'text to video', 'video', 'veo 3', 'veo 2', 'veo'],
           'image-to-video': ['khung hình thành video', 'hình ảnh thành video', 'image to video'],
           'component-to-video': ['thành phần thành video', 'component to video'],
-          'text-to-image': ['hình ảnh', 'văn bản thành hình ảnh', 'text to image', 'image'],
+          'text-to-image': ['văn bản thành hình ảnh', 'text to image', 'hình ảnh', 'image', 'imagen 3', 'imagen'],
           'image-to-image': ['hình ảnh thành hình ảnh', 'image to image'],
           'agent': ['tự động hóa agent', 'agent mode', 'agent']
         };
@@ -114,31 +114,62 @@ export class FormFiller {
     return false;
   }
 
-  async fillPrompt(text: string, timeout: number = 2000): Promise<boolean> {
+  async fillPrompt(text: string, timeout: number = 3000): Promise<boolean> {
     try {
+      // 1. Tìm ô Prompt bằng selectors hoặc text placeholder 'Bạn muốn tạo gì?'
+      const coords = await this.page.evaluate((sel: string) => {
+        // Ưu tiên 1: Tìm phần tử có chữ "Bạn muốn tạo gì?"
+        const all = Array.from(document.querySelectorAll('*'));
+        const promptDiv = all.find((el: any) => {
+          const t = (el.textContent || '').trim();
+          const rect = el.getBoundingClientRect();
+          return (t === 'Bạn muốn tạo gì?' || t.includes('Bạn muốn tạo')) && rect.width > 150 && rect.height > 15;
+        });
+
+        if (promptDiv) {
+          const rect = (promptDiv as HTMLElement).getBoundingClientRect();
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        }
+
+        // Ưu tiên 2: Selector chuẩn
+        const el = document.querySelector(sel);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+          }
+        }
+        return null;
+      }, this.selectors.promptTextarea);
+
+      if (coords) {
+        await this.page.mouse.click(coords.x, coords.y);
+        await new Promise((r) => setTimeout(r, 300));
+
+        // Xóa nội dung cũ
+        await this.page.keyboard.down('Control').catch(() => {});
+        await this.page.keyboard.press('KeyA').catch(() => {});
+        await this.page.keyboard.up('Control').catch(() => {});
+        await this.page.keyboard.press('Backspace').catch(() => {});
+        await new Promise((r) => setTimeout(r, 200));
+
+        // Gõ nội dung prompt
+        await this.page.keyboard.type(text, { delay: 12 });
+        logger.info(`Filled prompt via keyboard: "${text.substring(0, 40)}..."`);
+        return true;
+      }
+
+      // Fallback
       const el = await this.page.waitForSelector(this.selectors.promptTextarea, { timeout }).catch(() => null);
       if (el) {
         await el.click().catch(() => {});
-        await el.type(text).catch(() => {});
-        // Also dispatch standard DOM input event for reactive frameworks like Vue/React & contenteditable
-        await this.page.evaluate((sel: string, val: string) => {
-          const area = document.querySelector(sel) as HTMLElement;
-          if (area) {
-            if (area.getAttribute('contenteditable') === 'true') {
-              area.innerText = val;
-            } else if ('value' in area) {
-              (area as HTMLInputElement).value = val;
-            }
-            area.dispatchEvent(new Event('input', { bubbles: true }));
-            area.dispatchEvent(new Event('change', { bubbles: true }));
-          }
-        }, this.selectors.promptTextarea, text).catch(() => {});
-
-        logger.info(`Filled prompt: ${text.substring(0, 30)}...`);
+        await el.focus().catch(() => {});
+        await this.page.keyboard.type(text, { delay: 10 }).catch(() => {});
+        logger.info(`Filled prompt: ${text.substring(0, 35)}...`);
         return true;
       }
-    } catch {
-      logger.info(`prompt textarea not found on current page/frame (selector: ${this.selectors.promptTextarea})`);
+    } catch (e: any) {
+      logger.debug(`fillPrompt error: ${e.message}`);
     }
     return false;
   }

@@ -1,13 +1,12 @@
 {
-  "url": "https://labs.google/fx/tools/flow",
+  "url": "https://labs.google/fx/vi/tools/flow",
   "mode": "text-to-image",
   "aspectRatio": "16:9",
-  "outputCount": 1,
-  "startIndex": 1,
-  "prompt": "A futuristic neon cyberpunk city with flying cars at sunset, 4k ultra realistic",
+  "outputCount": 2,
+  "startIndex": 3,
+  "prompt": "A beautiful peaceful organic farm with green rolling hills, cute cows and sheep grazing, a classic red wooden barn, golden hour sunrise lighting, 8k ultra detailed photography masterwork",
   "prompts": [
-    "A futuristic neon cyberpunk city with flying cars at sunset, 4k ultra realistic",
-    "A cinematic drone shot flying over majestic green mountains and waterfalls"
+    "A beautiful peaceful organic farm with green rolling hills, cute cows and sheep grazing, a classic red wooden barn, golden hour sunrise lighting, 8k ultra detailed photography masterwork"
   ],
   "delayRange": [
     15,
@@ -15,7 +14,7 @@
   ],
   "download": {
     "enabled": true,
-    "folder": "./downloads/veo-folder-1",
+    "folder": "./downloads/farm-project",
     "quality": "1080p",
     "autoRename": true
   },
@@ -24,7 +23,7 @@
     "dropdown": "option1",
     "checkbox": true
   },
-  "timeout": 60,
+  "timeout": 180,
   "extensionPath": "C:\\Users\\ADMIN\\AppData\\Roaming\\shardx-launcher\\extensions\\flow-automation-auto-flow",
   "group": "Veo3",
   "profileId": "",

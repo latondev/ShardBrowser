@@ -1,4 +1,4 @@
-import puppeteer, { Browser } from 'puppeteer';
+import puppeteer, { Browser } from 'puppeteer-core';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ShardBrowserApiClient } from './shard-api';

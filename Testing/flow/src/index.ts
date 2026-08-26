@@ -80,19 +80,29 @@ export async function runFlow(configPath: string): Promise<void> {
     const promptList = config.prompts && config.prompts.length > 0 ? config.prompts : [config.prompt];
     const executor = new Executor(targetPage);
 
-    for (let i = 0; i < promptList.length; i++) {
-      const currentPrompt = promptList[i];
-      logger.info(`[Prompt ${i + 1}/${promptList.length}] Processing: "${currentPrompt.substring(0, 40)}..."`);
-      
-      await formFiller.fillStartIndex(config.startIndex + i);
-      await formFiller.fillPrompt(currentPrompt);
-      await executor.clickStart();
+    const isSidePanel = targetPage.url().includes('side-panel') || targetPage.url().startsWith('chrome-extension://');
 
-      if (i < promptList.length - 1) {
-        const [minDelay, maxDelay] = config.delayRange || [5, 10];
-        const delaySeconds = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
-        logger.info(`Waiting ${delaySeconds}s before next prompt...`);
-        await new Promise((r) => setTimeout(r, delaySeconds * 1000));
+    if (isSidePanel) {
+      logger.info(`Injecting all ${promptList.length} prompts directly into Extension Side Panel...`);
+      await formFiller.fillPrompt(promptList.join('\n\n'));
+      await new Promise((r) => setTimeout(r, 800));
+      await executor.clickStart();
+      logger.info('Started Extension batch automation!');
+    } else {
+      for (let i = 0; i < promptList.length; i++) {
+        const currentPrompt = promptList[i];
+        logger.info(`[Prompt ${i + 1}/${promptList.length}] Processing: "${currentPrompt.substring(0, 40)}..."`);
+        
+        await formFiller.fillStartIndex(config.startIndex + i);
+        await formFiller.fillPrompt(currentPrompt);
+        await executor.clickStart();
+
+        if (i < promptList.length - 1) {
+          const [minDelay, maxDelay] = config.delayRange || [5, 10];
+          const delaySeconds = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+          logger.info(`⏳ Waiting ${delaySeconds}s before next prompt...`);
+          await new Promise((r) => setTimeout(r, delaySeconds * 1000));
+        }
       }
     }
 

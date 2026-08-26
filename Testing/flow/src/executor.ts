@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { SelectorNotFoundError } from './error-handler';
 import { logger } from './logger';
 import { SELECTORS } from './selectors';
@@ -13,60 +15,53 @@ export class Executor {
 
   async clickStart(timeout: number = 3000): Promise<boolean> {
     try {
-      // 1. Try standard / PrimeVue selector
-      const el = await this.page.waitForSelector(this.selectors.startButton, { timeout }).catch(() => null);
-      if (el) {
-        await el.click().catch(() => {});
-        logger.info('Clicked Start button');
-        return true;
-      }
+      // 1. Nhấn Enter trực tiếp từ bàn phím
+      await this.page.keyboard.press('Enter').catch(() => {});
+      logger.info('Triggered Google Flow generation via Enter key');
+      await new Promise((r) => setTimeout(r, 400));
 
-      // 2. Try text matching for Vietnamese/English start action buttons
-      const clicked = await this.page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, .p-button, [role="button"]'));
-        for (const btn of buttons) {
-          const text = (btn.textContent || '').trim().toLowerCase();
-          if (text.includes('bắt đầu') || text.includes('tạo') || text.includes('start') || text.includes('chạy')) {
-            (btn as HTMLElement).click();
-            return true;
-          }
-        }
-        return false;
-      }).catch(() => false);
+      // 2. Thử click thêm nút mũi tên gửi (submit button) trên thanh prompt
+      await this.page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'));
+        const sendBtn = btns.find(b => {
+          const t = (b.textContent || '').toLowerCase();
+          const hasSendIcon = b.querySelector('i, svg')?.textContent?.includes('arrow_forward') || 
+                              b.querySelector('i, svg')?.textContent?.includes('send') ||
+                              b.querySelector('i, svg')?.textContent?.includes('spark') ||
+                              b.querySelector('i, svg')?.textContent?.includes('auto_awesome');
+          return hasSendIcon || t === 'tạo' || t === 'create' || t === 'generate' || t === 'chạy';
+        });
+        if (sendBtn) (sendBtn as HTMLElement).click();
+      }).catch(() => {});
 
-      if (clicked) {
-        logger.info('Clicked Start button by text matching');
-        return true;
-      }
-
-      // 3. Trigger Google Flow generation by pressing Enter in the prompt input
-      const promptInput = await this.page.$('div[contenteditable="true"], textarea, #prompt').catch(() => null);
-      if (promptInput) {
-        await promptInput.focus().catch(() => {});
-        await this.page.keyboard.press('Enter').catch(() => {});
-        logger.info('Triggered Google Flow generation via Enter key');
-        return true;
-      }
+      return true;
     } catch {
-      logger.info(`Start button not found on current page/frame (selector: ${this.selectors.startButton})`);
+      return false;
     }
-    return false;
   }
 
-  async waitForExecution(timeout: number = 60000): Promise<void> {
-    logger.info(`Waiting for Google Flow generation to complete (timeout: ${timeout / 1000}s)...`);
+  async waitForExecution(timeout: number = 90000): Promise<void> {
+    logger.info(`Đang theo dõi tiến độ render Google Flow (timeout: ${timeout / 1000}s)...`);
     const startTime = Date.now();
+    let pollCount = 0;
     while (Date.now() - startTime < timeout) {
-      const isGenerating = await this.page.evaluate(() => {
-        // Look for progress indicators, e.g. "10%", "50%", progress bars, or spinner icons
+      const status = await this.page.evaluate(() => {
         const texts = Array.from(document.querySelectorAll('div, span, p')).map((e: any) => e.innerText || '');
         const hasPercent = texts.some((t: string) => /^\d{1,2}%$/.test(t.trim()));
-        const hasGeneratingSpinners = document.querySelectorAll('div[data-tile-id] [style*="brightness(1)"], svg.animate-spin').length > 0;
-        return hasPercent || hasGeneratingSpinners;
-      }).catch(() => false);
+        const hasSpinners = document.querySelectorAll('svg.animate-spin, .animate-spin, div[style*="brightness(1)"]').length > 0;
+        const mediaCount = document.querySelectorAll('img[src*="googleusercontent"], img[src*="blob:"], video').length;
+        return { isGenerating: hasPercent || hasSpinners, mediaCount };
+      }).catch(() => ({ isGenerating: false, mediaCount: 0 }));
 
-      if (!isGenerating && Date.now() - startTime > 8000) {
-        logger.info('Generation completed successfully on Google Flow!');
+      pollCount++;
+      const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+      if (pollCount % 3 === 0) {
+        logger.info(`⏳ [${elapsedSec}s / ${timeout / 1000}s] Tiến độ render trên Google Flow: ${status.isGenerating ? 'Đang tạo video/ảnh...' : 'Đang xử lý...'}`);
+      }
+
+      // Chờ ít nhất 25 giây và không còn spinner
+      if (!status.isGenerating && Date.now() - startTime > 25000) {
+        logger.info(`✅ Quá trình render đã hoàn tất! (Tìm thấy ${status.mediaCount} media trên canvas)`);
         break;
       }
       await new Promise((r) => setTimeout(r, 3000));
@@ -74,45 +69,127 @@ export class Executor {
     logger.info('Execution step finished');
   }
 
-  async downloadCompletedMedia(quality: string = '1080p'): Promise<number> {
-    logger.info(`Checking and triggering download for completed media items (Quality: ${quality})...`);
+  async downloadCompletedMedia(quality: string = '1080p', targetDir: string = './downloads/veo-folder-1'): Promise<number> {
+    logger.info(`Kiểm tra và tự động tải ảnh/video đã render (Thư mục: ${targetDir})...`);
     try {
-      const downloadCount = await this.page.evaluate(async (targetQuality: string) => {
-        let count = 0;
-        const tiles = Array.from(document.querySelectorAll('div[data-tile-id]'));
-        for (const tile of tiles) {
-          const media = tile.querySelector('video, img');
-          if (!media) continue;
+      if (!fs.existsSync(targetDir)) {
+        try {
+          fs.mkdirSync(targetDir, { recursive: true });
+        } catch {}
+      }
 
-          tile.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-          tile.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      // 1. Quét tìm tất cả ảnh và video trên Google Flow Canvas
+      const mediaList = await this.page.evaluate(async () => {
+        const results: { type: string; src: string; base64?: string; width?: number; height?: number }[] = [];
+        const seenUrls = new Set<string>();
 
-          const moreBtn = tile.querySelector('button') as HTMLElement;
-          if (moreBtn) {
-            moreBtn.click();
-            await new Promise((r) => setTimeout(r, 400));
+        // Quét tất cả thẻ img trên trang
+        const images = Array.from(document.querySelectorAll('img'));
+        for (const img of images) {
+          const src = img.src || img.getAttribute('src') || '';
+          if (src && !seenUrls.has(src)) {
+            // Bỏ qua icon nhỏ / avatar
+            if (src.includes('avatar') || src.includes('google_logo') || src.includes('icon') || img.naturalWidth < 100) {
+              continue;
+            }
 
-            const downloadItem = Array.from(document.querySelectorAll('button, div[role="menuitem"]')).find(
-              (b) => (b.textContent || '').toLowerCase().includes('tải') || (b.textContent || '').toLowerCase().includes('download')
-            ) as HTMLElement;
-
-            if (downloadItem) {
-              downloadItem.click();
-              count++;
-              await new Promise((r) => setTimeout(r, 500));
-
-              const qualityBtn = Array.from(document.querySelectorAll('button')).find((b) =>
-                (b.textContent || '').includes(targetQuality)
-              ) as HTMLElement;
-              if (qualityBtn) qualityBtn.click();
+            seenUrls.add(src);
+            if (src.startsWith('data:image')) {
+              results.push({ type: 'image/png', src, base64: src, width: img.naturalWidth, height: img.naturalHeight });
+            } else {
+              try {
+                const res = await fetch(src);
+                const blob = await res.blob();
+                const reader = new FileReader();
+                const b64 = await new Promise<string>((resolve) => {
+                  reader.onloadend = () => resolve(reader.result as string);
+                  reader.readAsDataURL(blob);
+                });
+                results.push({ type: 'image/png', src, base64: b64, width: img.naturalWidth, height: img.naturalHeight });
+              } catch {
+                results.push({ type: 'image/png', src, width: img.naturalWidth, height: img.naturalHeight });
+              }
             }
           }
         }
-        return count;
-      }, quality);
 
-      logger.info(`Successfully triggered download for ${downloadCount} media items.`);
-      return downloadCount;
+        // Quét tất cả thẻ div có background-image
+        const divs = Array.from(document.querySelectorAll('div[style*="background-image"], div[style*="url("]'));
+        for (const div of divs) {
+          const bg = (div as HTMLElement).style.backgroundImage || '';
+          const match = bg.match(/url\(["']?(https?:\/\/[^"')]+|data:image\/[^"')]+|blob:[^"')]+)["']?\)/);
+          if (match && match[1] && !seenUrls.has(match[1])) {
+            const url = match[1];
+            seenUrls.add(url);
+            try {
+              const res = await fetch(url);
+              const blob = await res.blob();
+              const reader = new FileReader();
+              const b64 = await new Promise<string>((resolve) => {
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.readAsDataURL(blob);
+              });
+              results.push({ type: 'image/png', src: url, base64: b64 });
+            } catch {
+              results.push({ type: 'image/png', src: url });
+            }
+          }
+        }
+
+        // Quét tất cả thẻ video
+        const videos = Array.from(document.querySelectorAll('video'));
+        for (const vid of videos) {
+          const src = vid.src || vid.querySelector('source')?.src || '';
+          if (src && !seenUrls.has(src)) {
+            seenUrls.add(src);
+            results.push({ type: 'video/mp4', src });
+          }
+        }
+
+        return results;
+      });
+
+      logger.info(`Tìm thấy ${mediaList.length} tệp ảnh/video chất lượng cao trên Google Flow Canvas!`);
+
+      let savedCount = 0;
+      for (const [idx, item] of mediaList.entries()) {
+        const timestamp = Date.now();
+        const ext = item.type.includes('video') ? 'mp4' : 'png';
+        const fileName = `flow_output_${timestamp}_${idx + 1}.${ext}`;
+        const filePath = path.join(targetDir, fileName);
+
+        if (item.base64 && item.base64.includes('base64,')) {
+          const base64Data = item.base64.split('base64,')[1];
+          fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+          const sizeKb = Math.round(fs.statSync(filePath).size / 1024);
+          logger.info(`💾 [ĐÃ TẢI THÀNH CÔNG VỀ MÁY]: ${filePath} (${sizeKb} KB)`);
+          savedCount++;
+        }
+      }
+
+      // 2. Kích hoạt nút Tải xuống trên UI Google Flow
+      const uiDownloads = await this.page.evaluate(() => {
+        let clicked = 0;
+        const allButtons = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
+        for (const btn of allButtons) {
+          const txt = (btn.textContent || '').toLowerCase();
+          const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+          const hasDownloadIcon = btn.querySelector('i, svg')?.textContent?.includes('download') || 
+                                  btn.querySelector('i, svg')?.classList?.value?.includes('download');
+          if (hasDownloadIcon || txt.includes('tải') || txt.includes('download') || aria.includes('download')) {
+            (btn as HTMLElement).click();
+            clicked++;
+          }
+        }
+        return clicked;
+      }).catch(() => 0);
+
+      if (uiDownloads > 0) {
+        logger.info(`Đã kích hoạt ${uiDownloads} nút tải xuống trực tiếp trên giao diện Google Flow.`);
+      }
+
+      logger.info(`✅ Hoàn tất lưu trữ ${savedCount || uiDownloads} tệp ảnh/video về thư mục ${targetDir}!`);
+      return savedCount || uiDownloads;
     } catch (e: any) {
       logger.warn(`Download trigger: ${e.message}`);
       return 0;

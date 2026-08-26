@@ -226,12 +226,14 @@ pub async fn launch_profile(
                 for entry in entries.flatten() {
                     let path = entry.path();
                     let id = entry.file_name().to_string_lossy().to_string();
-                    if !disabled_set.contains(&id) && path.is_dir() && path.join("manifest.json").exists() {
+                    if path.is_dir() && path.join("manifest.json").exists() {
                         if let Some(allowed) = &allowed_ext_ids {
+                            // Custom mode: Nạp các extension được user chủ động chọn riêng cho profile này (ghi đè cài đặt tổng)
                             if allowed.contains(&id) {
                                 ext_paths.push(path.to_string_lossy().to_string());
                             }
-                        } else {
+                        } else if !disabled_set.contains(&id) {
+                            // Chế độ "All active": Chỉ nạp các extension đang bật toàn cục trong Library
                             ext_paths.push(path.to_string_lossy().to_string());
                         }
                     }

@@ -29,8 +29,37 @@ import { ProxyXoayClient } from "./proxyxoay_client.js";
 // ==============================================================================
 // 1. CẤU HÌNH HỆ THỐNG
 // ==============================================================================
-const LAUNCHER_API_URL = process.env.LAUNCHER_API_URL || "http://127.0.0.1:40325";
-const LAUNCHER_API_TOKEN = process.env.LAUNCHER_API_TOKEN || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaGFyZHgtYXBpIiwiaWF0IjoxNzg3MTI4NjE5LCJleHAiOjIxMDI0ODg2MTl9.Y44-0maSpd_9e7_U3yLPHgvFb1O2_GBHReb6qs0H2p0";
+function loadShardLauncherConfig() {
+  const appData = process.env.APPDATA || "";
+  if (appData) {
+    const settingsPath = path.join(appData, "shardx-launcher", "settings.json");
+    if (existsSync(settingsPath)) {
+      try {
+        const raw = readFileSync(settingsPath, "utf-8");
+        const settings = JSON.parse(raw);
+        const port = settings.api_port || 40326;
+        const secret = settings.api_secret || "";
+        let token = "";
+        if (secret) {
+          const header = Buffer.from(JSON.stringify({ typ: "JWT", alg: "HS256" })).toString("base64url");
+          const now = Math.floor(Date.now() / 1000);
+          const payload = Buffer.from(JSON.stringify({ sub: "shardx-api", iat: now, exp: now + 86400 * 30 })).toString("base64url");
+          const sig = crypto.createHmac("sha256", secret).update(`${header}.${payload}`).digest().toString("base64url");
+          token = `${header}.${payload}.${sig}`;
+        }
+        return {
+          url: `http://127.0.0.1:${port}`,
+          token: token
+        };
+      } catch {}
+    }
+  }
+  return { url: "http://127.0.0.1:40326", token: "" };
+}
+
+const DEFAULT_LAUNCHER_CONFIG = loadShardLauncherConfig();
+const LAUNCHER_API_URL = process.env.LAUNCHER_API_URL || DEFAULT_LAUNCHER_CONFIG.url;
+const LAUNCHER_API_TOKEN = process.env.LAUNCHER_API_TOKEN || DEFAULT_LAUNCHER_CONFIG.token;
 
 // ==============================================================================
 // 2. CLASS RUNNER CHÍNH
@@ -63,8 +92,9 @@ export class AiAgentRunner {
   };
 
   constructor(customConfig = {}) {
-    this._launcherApiUrl = LAUNCHER_API_URL;
-    this._launcherToken = LAUNCHER_API_TOKEN;
+    const liveConfig = loadShardLauncherConfig();
+    this._launcherApiUrl = process.env.LAUNCHER_API_URL || liveConfig.url;
+    this._launcherToken = process.env.LAUNCHER_API_TOKEN || liveConfig.token;
     this._headers = { Authorization: `Bearer ${this._launcherToken}` };
     this._gmailClient = new GmailCreatorClient(customConfig.rapidApiKey);
     this._mailTm = new MailTmClient();

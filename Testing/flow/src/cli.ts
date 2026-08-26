@@ -1,22 +1,35 @@
 #!/usr/bin/env node
 
-import { Command } from 'commander';
 import { runFlow } from './index';
 import { logger } from './logger';
+import * as fs from 'fs';
 
-const program = new Command();
+function parseArgs(): { config: string; profile?: string } {
+  const args = process.argv.slice(2);
+  let configPath = 'config.json';
+  let profileName: string | undefined;
 
-program
-  .name('test-extension-flow')
-  .description('Automated flow for ShardBrowser extension')
-  .option('-c, --config <path>', 'Path to configuration JSON file', 'config.json')
-  .option('-p, --profile <name>', 'ShardBrowser profile name (optional)')
-  .parse(process.argv);
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-c' || args[i] === '--config') {
+      configPath = args[i + 1] || 'config.json';
+      i++;
+    } else if (args[i] === '-p' || args[i] === '--profile') {
+      profileName = args[i + 1];
+      i++;
+    }
+  }
 
-const options = program.opts();
+  if (!fs.existsSync(configPath) && fs.existsSync('config.sample.json')) {
+    configPath = 'config.sample.json';
+  }
+
+  return { config: configPath, profile: profileName };
+}
 
 (async () => {
   try {
+    const options = parseArgs();
+    logger.info(`Running full flow with config: ${options.config}`);
     await runFlow(options.config);
     process.exit(0);
   } catch (error: any) {

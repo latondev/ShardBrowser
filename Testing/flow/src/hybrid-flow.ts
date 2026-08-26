@@ -1,7 +1,22 @@
-import puppeteer, { Browser, Page, Target } from 'puppeteer';
+import puppeteer, { Browser, Page, Target } from 'puppeteer-core';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ShardBrowserApiClient } from './shard-api';
+
+import * as http from 'http';
+
+function isPortOpen(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/json/version`, { timeout: 1500 }, (res) => {
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
 
 export interface HybridFlowOptions {
   profileId?: string;
@@ -22,7 +37,7 @@ export class HybridFlowController {
     const appData = process.env.APPDATA || '';
     const profileId = (rawProfileId && !rawProfileId.startsWith('--')) ? rawProfileId.trim() : undefined;
 
-    // 1. Kiểm tra instance profile đang chạy sẵn
+    // 1. Kiểm tra instance profile đang chạy sẵn và còn sống
     const userDataDir = path.join(appData, 'shardx-launcher', 'user-data');
     if (fs.existsSync(userDataDir)) {
       const dirs = fs.readdirSync(userDataDir);
@@ -33,10 +48,13 @@ export class HybridFlowController {
           try {
             const lines = fs.readFileSync(portFile, 'utf-8').trim().split(/\r?\n/);
             const port = parseInt(lines[0], 10);
-            if (!isNaN(port) && port > 0) {
+            if (!isNaN(port) && port > 0 && (await isPortOpen(port))) {
               console.log(`🔌 Kết nối tới ShardBrowser Profile [${pId}] tại cổng CDP ${port}...`);
               this._browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}` });
               return { browser: this._browser, profileId: pId };
+            } else if (port > 0) {
+              try { fs.unlinkSync(portFile); } catch {}
+              await this._apiClient.stopProfile(pId).catch(() => {});
             }
           } catch {}
         }

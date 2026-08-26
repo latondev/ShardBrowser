@@ -621,14 +621,35 @@ pub async fn serve(secret: String, port: u16) {
         .route("/health", get(health))
         .merge(protected);
 
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    match tokio::net::TcpListener::bind(addr).await {
-        Ok(listener) => {
-            eprintln!("[launcher] automation API listening on http://{addr}");
-            if let Err(e) = axum::serve(listener, app).await {
-                eprintln!("[launcher] API server error: {e}");
+    let mut actual_listener = None;
+    let mut actual_port = port;
+
+    for p in port..port + 10 {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], p));
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(listener) => {
+                actual_listener = Some((listener, addr));
+                actual_port = p;
+                break;
+            }
+            Err(e) => {
+                eprintln!("[launcher] API bind {addr} failed: {e}, trying next port...");
             }
         }
-        Err(e) => eprintln!("[launcher] API bind {addr} failed: {e}"),
+    }
+
+    if let Some((listener, addr)) = actual_listener {
+        eprintln!("[launcher] automation API listening on http://{addr}");
+        if actual_port != port {
+            if let Ok(mut s) = crate::settings::load() {
+                s.api_port = actual_port;
+                let _ = crate::settings::save(&s);
+            }
+        }
+        if let Err(e) = axum::serve(listener, app).await {
+            eprintln!("[launcher] API server error: {e}");
+        }
+    } else {
+        eprintln!("[launcher] API failed to bind on any port in range {port}..{}", port + 10);
     }
 }

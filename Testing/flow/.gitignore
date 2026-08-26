@@ -1,13 +1,4 @@
 node_modules/
 dist/
-logs/
+downloads/
 *.log
-.env
-*.lock
-.DS_Store
-Thumbs.db
-*.tmp
-*.swp
-.vscode/
-.idea/
-coverage/

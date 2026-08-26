@@ -1,4 +1,4 @@
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
 import { BrowserSession } from './types';
 import { ConnectionError } from './error-handler';
 import { logger } from './logger';
