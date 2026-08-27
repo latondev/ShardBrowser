@@ -51,6 +51,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+github-2fa-secrets.txt
 
 # ===== MCP server local install (downloaded by the user post-install) =====
 mcp/node_modules/

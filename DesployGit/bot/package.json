@@ -1,0 +1,20 @@
+{
+  "name": "desploy-git-bot-worker",
+  "version": "1.0.0",
+  "description": "Autonomous GitHub Account Registration Suite & Bot Worker",
+  "main": "batch_runner.js",
+  "type": "module",
+  "scripts": {
+    "start": "node batch_runner.js 100 10",
+    "single": "node ai_agent_runner.js",
+    "check-quota": "node check_rapidapi_quota.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "puppeteer-core": "^23.10.0"
+  },
+  "keywords": ["bot", "github-automation", "puppeteer", "account-creator"],
+  "author": "LatonDev",
+  "license": "MIT"
+}

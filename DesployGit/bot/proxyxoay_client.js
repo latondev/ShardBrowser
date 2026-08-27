@@ -23,6 +23,27 @@ export class ProxyXoayClient {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  // Kiểm tra đường truyền Proxy đã kết nối mạng thông suốt chưa
+  async _validateProxyConnectivity(host, port, retries = 4) {
+    console.log(`⏳ [ProxyXoay] Đang kiểm tra độ sẵn sàng của đường truyền Proxy (${host}:${port})...`);
+    for (let i = 1; i <= retries; i++) {
+      try {
+        const res = await axios.get("https://api.ipify.org?format=json", {
+          proxy: { host, port, protocol: "http" },
+          timeout: 8000
+        });
+        if (res.data && res.data.ip) {
+          console.log(`🌐 [Proxy Sẵn Sàng] Đường truyền hoạt động mượt mà (IP Thực Tế: ${res.data.ip})`);
+          return true;
+        }
+      } catch {
+        console.log(`⏳ [Proxy Khởi Tạo] Đường truyền đang thiết lập kết nối, đợi 3s (lần ${i}/${retries})...`);
+        await this._sleep(3000);
+      }
+    }
+    return true; // Vẫn tiếp tục nếu timeout nhẹ
+  }
+
   /**
    * Lấy Proxy xoay mới từ proxyxoay.shop
    * @param {Object} options - { protocol: 'http' | 'socks5', forceWait: boolean }
@@ -45,6 +66,7 @@ export class ProxyXoayClient {
 
           if (!rawProxy && this._lastProxy) {
             console.log(`ℹ️ [ProxyXoay] Sử dụng IP hiện tại: ${this._lastProxy.proxyString} (${data.message})`);
+            await this._validateProxyConnectivity(this._lastProxy.host, this._lastProxy.port);
             return this._lastProxy;
           }
 
@@ -69,6 +91,10 @@ export class ProxyXoayClient {
 
             this._lastProxy = result;
             console.log(`✅ [ProxyXoay Thành Công]: [${result.proxyString}] | ISP: ${result.isp} | Vị trí: ${result.location} | IP: ${result.ip}`);
+            
+            // Đảm bảo Proxy đã mở luồng thông suốt trước khi mở trình duyệt
+            await this._validateProxyConnectivity(host, port);
+
             return result;
           }
         }

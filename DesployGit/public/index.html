@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bảng Điều Khiển - DesployGit Account Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="dashboard-wrapper">
+    <!-- Top Navigation -->
+    <header class="top-navbar glass-panel">
+      <div class="nav-brand">
+        <div class="nav-logo">⚡</div>
+        <div class="nav-title">
+          <h1>DesployGit Account Hub</h1>
+          <p class="nav-subtitle">Hệ thống quản lý tài khoản trung tâm 24/7</p>
+        </div>
+      </div>
+
+      <div class="nav-actions">
+        <div class="user-info">
+          <span>👤</span>
+          <span id="currentAdminName">Admin</span>
+        </div>
+        <button id="refreshBtn" class="btn btn-secondary btn-sm" title="Tải lại dữ liệu">
+          <span>🔄</span> Làm mới
+        </button>
+        <button id="logoutBtn" class="btn btn-danger-outline btn-sm">
+          <span>🚪</span> Đăng xuất
+        </button>
+      </div>
+    </header>
+
+    <!-- Stats Grid -->
+    <section class="stats-grid">
+      <div class="stat-card glass-panel">
+        <div class="stat-icon total">📦</div>
+        <div class="stat-details">
+          <span class="stat-label">Tổng Tài Khoản</span>
+          <span id="statTotalAccounts" class="stat-value">0</span>
+        </div>
+      </div>
+
+      <div class="stat-card glass-panel">
+        <div class="stat-icon today">✨</div>
+        <div class="stat-details">
+          <span class="stat-label">Đăng Ký Hôm Nay</span>
+          <span id="statTodayAccounts" class="stat-value">0</span>
+        </div>
+      </div>
+
+      <div class="stat-card glass-panel">
+        <div class="stat-icon live">🌐</div>
+        <div class="stat-details">
+          <span class="stat-label">Trạng Thái Server</span>
+          <span class="stat-value text-success" style="font-size: 20px;">● Hoạt động</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Controls Toolbar -->
+    <section class="toolbar-panel glass-panel">
+      <div class="toolbar-left">
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" placeholder="Tìm theo email, username, proxy...">
+        </div>
+
+        <select id="statusFilter" class="filter-select">
+          <option value="">Tất cả trạng thái</option>
+          <option value="active">Active (Hoạt động)</option>
+        </select>
+      </div>
+
+      <div class="toolbar-right">
+        <button id="copyAllTxtBtn" class="btn btn-secondary btn-sm" title="Sao chép toàn bộ danh sách hiện tại dạng email|pass|2fa">
+          <span>📋</span> Copy All (txt)
+        </button>
+        <button id="exportTxtBtn" class="btn btn-primary btn-sm">
+          <span>📥</span> Xuất File .TXT
+        </button>
+        <button id="exportCsvBtn" class="btn btn-secondary btn-sm">
+          <span>📊</span> CSV
+        </button>
+        <button id="exportJsonBtn" class="btn btn-secondary btn-sm">
+          <span>⚙️</span> JSON
+        </button>
+      </div>
+    </section>
+
+    <!-- Accounts Table -->
+    <section class="table-panel glass-panel">
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 50px;">ID</th>
+              <th>Email</th>
+              <th>Username</th>
+              <th>Mật khẩu</th>
+              <th>2FA Secret</th>
+              <th>Proxy</th>
+              <th>Thời gian tạo</th>
+              <th style="text-align: right;">Hành động</th>
+            </tr>
+          </thead>
+          <tbody id="accountsTableBody">
+            <tr>
+              <td colspan="8" style="text-align: center; padding: 40px;" class="text-muted">
+                ⏳ Đang tải dữ liệu...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div class="pagination-wrapper">
+        <div class="page-info">
+          Hiển thị <span id="pageCurrentRange" class="mono font-bold">0 - 0</span> trên tổng số <span id="pageTotalCount" class="mono font-bold">0</span> tài khoản
+        </div>
+        <div class="page-buttons">
+          <button id="prevPageBtn" class="btn btn-secondary btn-sm" disabled>◀ Trang trước</button>
+          <span id="pageNumberDisplay" class="btn btn-secondary btn-sm" style="cursor: default;">1 / 1</span>
+          <button id="nextPageBtn" class="btn btn-secondary btn-sm" disabled>Trang sau ▶</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Detail Modal -->
+  <div id="detailModal" class="modal-overlay hidden">
+    <div class="modal-content glass-panel">
+      <div class="modal-header">
+        <h3 id="modalEmailTitle">Chi Tiết Tài Khoản</h3>
+        <button id="closeModalBtn" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="detail-row">
+          <label>Email Đăng Ký:</label>
+          <div class="detail-value-box">
+            <span id="modalEmail" class="mono"></span>
+            <button class="copy-mini-btn" onclick="copyText('modalEmail')">📋</button>
+          </div>
+        </div>
+
+        <div class="detail-row">
+          <label>Username GitHub:</label>
+          <div class="detail-value-box">
+            <span id="modalUsername" class="mono"></span>
+            <button class="copy-mini-btn" onclick="copyText('modalUsername')">📋</button>
+          </div>
+        </div>
+
+        <div class="detail-row">
+          <label>Mật Khẩu:</label>
+          <div class="detail-value-box">
+            <span id="modalPassword" class="mono"></span>
+            <button class="copy-mini-btn" onclick="copyText('modalPassword')">📋</button>
+          </div>
+        </div>
+
+        <div class="detail-row">
+          <label>2FA Secret Key (TOTP):</label>
+          <div class="detail-value-box">
+            <span id="modal2Fa" class="mono text-success"></span>
+            <button class="copy-mini-btn" onclick="copyText('modal2Fa')">📋</button>
+          </div>
+        </div>
+
+        <div class="detail-row">
+          <label>Mã Dự Phòng (Recovery Codes):</label>
+          <div class="detail-value-box" style="align-items: flex-start;">
+            <pre id="modalRecoveryCodes" class="mono" style="white-space: pre-wrap; font-size: 12px; margin: 0;"></pre>
+            <button class="copy-mini-btn" onclick="copyText('modalRecoveryCodes')">📋</button>
+          </div>
+        </div>
+
+        <div class="detail-row">
+          <label>Proxy & Thời Gian:</label>
+          <div class="detail-value-box">
+            <span id="modalProxyInfo" class="mono" style="font-size: 12px;"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Đăng nhập - DesployGit Account Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="login-body">
+  <div class="login-bg-glow"></div>
+  
+  <div class="login-card glass-panel">
+    <div class="login-header">
+      <div class="logo-icon">
+        <span>⚡</span>
+      </div>
+      <h2>DesployGit Hub</h2>
+      <p class="subtitle">Hệ thống quản lý tài khoản trung tâm</p>
+    </div>
+
+    <form id="loginForm" class="login-form">
+      <div id="loginAlert" class="alert hidden"></div>
+
+      <div class="form-group">
+        <label for="username">Tên quản trị (Username)</label>
+        <div class="input-wrapper">
+          <span class="input-icon">👤</span>
+          <input type="text" id="username" name="username" placeholder="Nhập username..." required autocomplete="username">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="password">Mật khẩu (Password)</label>
+        <div class="input-wrapper">
+          <span class="input-icon">🔒</span>
+          <input type="password" id="password" name="password" placeholder="Nhập mật khẩu..." required autocomplete="current-password">
+          <button type="button" id="togglePassword" class="icon-btn-toggle" title="Ẩn/Hiện mật khẩu">👁️</button>
+        </div>
+      </div>
+
+      <button type="submit" id="submitBtn" class="btn btn-primary btn-block">
+        <span class="btn-text">Đăng nhập Quản Trị</span>
+        <span class="btn-loader hidden">⏳ Đang xử lý...</span>
+      </button>
+    </form>
+
+    <div class="login-footer">
+      <span>🔒 Bảo vệ bởi JWT Session & Rate Limit</span>
+    </div>
+  </div>
+
+  <script>
+    const loginForm = document.getElementById("loginForm");
+    const loginAlert = document.getElementById("loginAlert");
+    const submitBtn = document.getElementById("submitBtn");
+    const togglePassword = document.getElementById("togglePassword");
+    const passwordInput = document.getElementById("password");
+
+    togglePassword.addEventListener("click", () => {
+      const isPass = passwordInput.type === "password";
+      passwordInput.type = isPass ? "text" : "password";
+      togglePassword.textContent = isPass ? "🙈" : "👁️";
+    });
+
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      loginAlert.classList.add("hidden");
+      
+      const username = document.getElementById("username").value.trim();
+      const password = passwordInput.value;
+
+      submitBtn.disabled = true;
+      submitBtn.querySelector(".btn-text").classList.add("hidden");
+      submitBtn.querySelector(".btn-loader").classList.remove("hidden");
+
+      try {
+        const res = await fetch("/api/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          if (data.token) {
+            localStorage.setItem("auth_token", data.token);
+          }
+          loginAlert.className = "alert alert-success";
+          loginAlert.textContent = "Đăng nhập thành công! Đang chuyển hướng...";
+          loginAlert.classList.remove("hidden");
+          setTimeout(() => {
+            window.location.href = "/index.html";
+          }, 500);
+        } else {
+          loginAlert.className = "alert alert-danger";
+          loginAlert.textContent = data.error || "Đăng nhập thất bại!";
+          loginAlert.classList.remove("hidden");
+        }
+      } catch (err) {
+        loginAlert.className = "alert alert-danger";
+        loginAlert.textContent = "Lỗi kết nối tới Server!";
+        loginAlert.classList.remove("hidden");
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.querySelector(".btn-text").classList.remove("hidden");
+        submitBtn.querySelector(".btn-loader").classList.add("hidden");
+      }
+    });
+  </script>
+</body>
+</html>

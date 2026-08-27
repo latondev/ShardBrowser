@@ -1,0 +1,37 @@
+# ==============================================================================
+# DOCKER COMPOSE CONFIGURATION - DESPLOYGIT ACCOUNT HUB
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  account-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: desploygit-account-hub
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      - PORT=8080
+      - API_SECRET_KEY=${API_SECRET_KEY:-shardx-secret-api-key-2026-very-secure}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-AdminSecure@2026!Pass}
+      - JWT_SECRET=${JWT_SECRET:-super-secure-jwt-secret-key-shardx-hub-2026}
+      - DATABASE_PATH=/app/data/accounts.db
+      - NODE_ENV=production
+    volumes:
+      # Mount thư mục data để SQLite bền vững không bị mất dữ liệu
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
