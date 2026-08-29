@@ -1,0 +1,408 @@
+﻿[
+    {
+        "Index":  1,
+        "Login":  "litalienkussmaul104@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "YBXMILOQIN7SQ7EN"
+    },
+    {
+        "Index":  2,
+        "Login":  "lacerenzaweigman7380@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "5QUZVN75RYNNX7TX"
+    },
+    {
+        "Index":  3,
+        "Login":  "fehrlekarma022@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "IL4B2ZYFCDIWP5IG"
+    },
+    {
+        "Index":  4,
+        "Login":  "jeleniewskimayeda563@outlook.com",
+        "Status":  "EMAIL_CODE_REQUIRED",
+        "Detail":  "CHƯA BẬT 2FA -\u003e BÁO GỬI CODE VỀ EMAIL",
+        "Secret":  "CRD4ZDGQYH55JLIY"
+    },
+    {
+        "Index":  5,
+        "Login":  "catanachariyoshi89@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "YNNX3EE4C76FIVIP"
+    },
+    {
+        "Index":  6,
+        "Login":  "sizelovefridman30@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "MGOR2K5C6OG7SMZJ"
+    },
+    {
+        "Index":  7,
+        "Login":  "lindloffettie390@outlook.com",
+        "Status":  "EMAIL_CODE_REQUIRED",
+        "Detail":  "CHƯA BẬT 2FA -\u003e BÁO GỬI CODE VỀ EMAIL",
+        "Secret":  "553QIIOYMBNSTUKH"
+    },
+    {
+        "Index":  8,
+        "Login":  "klusssprafka223@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "3PIAGZNZWDBJGOMD"
+    },
+    {
+        "Index":  9,
+        "Login":  "chavershollen0103@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "OG6GTCHFIC7FIXWS"
+    },
+    {
+        "Index":  10,
+        "Login":  "lebeckswogger36@outlook.com",
+        "Status":  "EMAIL_CODE_REQUIRED",
+        "Detail":  "CHƯA BẬT 2FA -\u003e BÁO GỬI CODE VỀ EMAIL",
+        "Secret":  "ZTZS6G3TJSBN6UDQ"
+    },
+    {
+        "Index":  11,
+        "Login":  "skubiksfatcu351@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "5PATENKGE7RP6L3U"
+    },
+    {
+        "Index":  12,
+        "Login":  "golsonespejel00@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "BQITYVOEDOHTDECA"
+    },
+    {
+        "Index":  13,
+        "Login":  "danekspomer645@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "OCDLDJ6VREH4TIN7"
+    },
+    {
+        "Index":  14,
+        "Login":  "zottilyle520@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "LXQGOTTWGHI4IIYU"
+    },
+    {
+        "Index":  15,
+        "Login":  "schimeljanhunen93@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "2K7DZZZGSONRJD6P"
+    },
+    {
+        "Index":  16,
+        "Login":  "lindallammon17@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "XMOUJETFAAF6TY7R"
+    },
+    {
+        "Index":  17,
+        "Login":  "philbertscardino5507@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "K2NYZZQPHLNKJ7QS"
+    },
+    {
+        "Index":  18,
+        "Login":  "doretheagordley155@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "AOYY6HPGDA47DTGV"
+    },
+    {
+        "Index":  19,
+        "Login":  "barreralofquist19@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "UTD4I5VD4Q7OY5KG"
+    },
+    {
+        "Index":  20,
+        "Login":  "bonadonatrumble4355@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "FIOK2FHLETUORNV3"
+    },
+    {
+        "Index":  21,
+        "Login":  "melendylambuth85@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "G3BYPJLCEUL5LABB"
+    },
+    {
+        "Index":  22,
+        "Login":  "creekmessa02@outlook.com",
+        "Status":  "EMAIL_CODE_REQUIRED",
+        "Detail":  "CHƯA BẬT 2FA -\u003e BÁO GỬI CODE VỀ EMAIL",
+        "Secret":  "XYXQMMKEPFK52TOI"
+    },
+    {
+        "Index":  23,
+        "Login":  "bloomlek5280@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "X4RGPI4DGW5PZXGP"
+    },
+    {
+        "Index":  24,
+        "Login":  "bugetttraffanstedt71@outlook.com",
+        "Status":  "EMAIL_CODE_REQUIRED",
+        "Detail":  "CHƯA BẬT 2FA -\u003e BÁO GỬI CODE VỀ EMAIL",
+        "Secret":  "5RUPKNLKLEZRKBQT"
+    },
+    {
+        "Index":  25,
+        "Login":  "prassmcgloster1144@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "ICPK5KLT5JF3QHGF"
+    },
+    {
+        "Index":  26,
+        "Login":  "ihemehespen5819@outlook.com",
+        "Status":  "EMAIL_CODE_REQUIRED",
+        "Detail":  "CHƯA BẬT 2FA -\u003e BÁO GỬI CODE VỀ EMAIL",
+        "Secret":  "H7YAXEXOOGX2VYGH"
+    },
+    {
+        "Index":  27,
+        "Login":  "trauthkozik6159@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "FTTGT4FQ46YSRRUW"
+    },
+    {
+        "Index":  28,
+        "Login":  "ledinsorola3846@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "RXR57ZBYJD2H63LY"
+    },
+    {
+        "Index":  29,
+        "Login":  "vanoussober194@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "XQFEIKOZE2OE5QOW"
+    },
+    {
+        "Index":  30,
+        "Login":  "arthurenman356@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "Z5NBDM4HLDFL3TQP"
+    },
+    {
+        "Index":  31,
+        "Login":  "marcelenemarine9821@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "GT3IMH2XBYEENLX2"
+    },
+    {
+        "Index":  32,
+        "Login":  "hargreavesburtts5053@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "HEKHUOYTU6C7RA67"
+    },
+    {
+        "Index":  33,
+        "Login":  "hudnellspielvogel16@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "647S5GCAO456VPTK"
+    },
+    {
+        "Index":  34,
+        "Login":  "magriboliver721@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "R4SWCCKDXTKHQ4CT"
+    },
+    {
+        "Index":  35,
+        "Login":  "montonebabine0720@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "UYQY5URYBJOLNHNA"
+    },
+    {
+        "Index":  36,
+        "Login":  "spencerstoeltzing3156@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "2PRGGIMKGLC3LIPC"
+    },
+    {
+        "Index":  37,
+        "Login":  "bonifieldvassell86@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "YQBEWKRZW2ERHTZD"
+    },
+    {
+        "Index":  38,
+        "Login":  "karenseaman8736@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "A7D7YHPMUUGFXAA5"
+    },
+    {
+        "Index":  39,
+        "Login":  "hemmingsenharville54@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "LDIBTXLX37PDMLUO"
+    },
+    {
+        "Index":  40,
+        "Login":  "brindgerolivos11@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "4334NFIMPPIWUYTG"
+    },
+    {
+        "Index":  41,
+        "Login":  "burleighransburg440@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "QNGNVSPA2QYWSBUT"
+    },
+    {
+        "Index":  42,
+        "Login":  "egertverlotte14@outlook.com",
+        "Status":  "EMAIL_CODE_REQUIRED",
+        "Detail":  "CHƯA BẬT 2FA -\u003e BÁO GỬI CODE VỀ EMAIL",
+        "Secret":  "ITCC7GI3GYTJAVDT"
+    },
+    {
+        "Index":  43,
+        "Login":  "montaluolaurelle1913@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "DG46FFNZSV27OPCZ"
+    },
+    {
+        "Index":  44,
+        "Login":  "bonneleloise425@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "VBHXR7NYEIWEQIBC"
+    },
+    {
+        "Index":  45,
+        "Login":  "rosebaughfloren8975@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "WWY3T264N4HCWWRA"
+    },
+    {
+        "Index":  46,
+        "Login":  "delacuestawaltersdorf668@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "JIEQHE5LFONPOKYF"
+    },
+    {
+        "Index":  47,
+        "Login":  "mttxrgsm503@otpquick.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "4YCFHPCD2O7JRODM"
+    },
+    {
+        "Index":  48,
+        "Login":  "liebecknesline0125@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "3JAUKZUKVGWMAIYV"
+    },
+    {
+        "Index":  49,
+        "Login":  "scheperswhetzel911@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "JB3C73T5AZOUQ5FZ"
+    },
+    {
+        "Index":  50,
+        "Login":  "lacerenzaweigman7380@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "5QUZVN75RYNNX7TX"
+    },
+    {
+        "Index":  51,
+        "Login":  "ya8tbjfn424@mlongmail.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "KQYTYNCQND42SUAT"
+    },
+    {
+        "Index":  52,
+        "Login":  "dnd.n.g.z.m.s.n.fsm.bt@gmail.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "BRHLSDIDZLCRBTBV"
+    },
+    {
+        "Index":  53,
+        "Login":  "mttxrgsm503@otpquick.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "4YCFHPCD2O7JRODM"
+    },
+    {
+        "Index":  54,
+        "Login":  "liebecknesline0125@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "3JAUKZUKVGWMAIYV"
+    },
+    {
+        "Index":  55,
+        "Login":  "scheperswhetzel911@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "JB3C73T5AZOUQ5FZ"
+    },
+    {
+        "Index":  56,
+        "Login":  "lacerenzaweigman7380@outlook.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "5QUZVN75RYNNX7TX"
+    },
+    {
+        "Index":  57,
+        "Login":  "ya8tbjfn424@mlongmail.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "KQYTYNCQND42SUAT"
+    },
+    {
+        "Index":  58,
+        "Login":  "dnd.n.g.z.m.s.n.fsm.bt@gmail.com",
+        "Status":  "2FA_ENABLED",
+        "Detail":  "Đã bật 2FA (Hỏi mã TOTP App)",
+        "Secret":  "BRHLSDIDZLCRBTBV"
+    }
+]

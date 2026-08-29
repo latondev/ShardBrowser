@@ -910,29 +910,42 @@ export class AiAgentRunner {
       // BƯỚC 0: TỰ ĐỘNG XÓA SẠCH TOÀN BỘ PROFILE CŨ TRONG SHARDBROWSER
       await this._deleteAllOldProfiles();
 
-      // BƯỚC 1: LẤY PROXY KÈM ĐẦY ĐỦ USERNAME & PASSWORD TỪ SHARDBROWSER
+      // BƯỚC 1: XOAY PROXY MỚI TỪ PROXYXOAY.SHOP TRƯỚC KHI TẠO PROFILE
       let chosenProxy = null;
-      try {
-        const localList = this._loadLocalProxies();
-        if (Array.isArray(localList) && localList.length > 0) {
-          if (options.proxyId) {
-            chosenProxy = localList.find(p => p.id === options.proxyId);
-          }
-          if (!chosenProxy) {
-            chosenProxy = localList[Math.floor(Math.random() * localList.length)];
-          }
+      if (!options.disableProxyXoay && this._proxyXoay) {
+        try {
+          console.log("🌐 [ProxyXoay] Đang yêu cầu xoay IP Proxy mới từ proxyxoay.shop trước khi tạo Profile...");
+          chosenProxy = await this._proxyXoay.getNewProxy({ protocol: "http" });
           this._activeProxy = chosenProxy;
-          const authInfo = chosenProxy.username ? ` | User: ${chosenProxy.username}` : " | No Auth";
-          console.log(`🌐 [Proxy ShardX] Đã chọn Proxy: [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | Country: ${chosenProxy.country || 'N/A'}`);
-        } else {
-          const { data: proxies } = await axios.get(`${this._launcherApiUrl}/proxies`, { headers: this._headers, timeout: 3000 });
-          if (Array.isArray(proxies) && proxies.length > 0) {
-            chosenProxy = proxies[Math.floor(Math.random() * proxies.length)];
-            this._activeProxy = chosenProxy;
-          }
+        } catch (pxErr) {
+          console.warn(`⚠️ [ProxyXoay Warning] Không thể lấy proxy xoay: ${pxErr.message}`);
         }
-      } catch (proxyErr) {
-        console.log(`🌐 [Network] Chạy IP Direct (${proxyErr.message}).`);
+      }
+
+      // Fallback: Nếu không lấy được proxy xoay hoặc có proxyId chỉ định thì lấy từ ShardBrowser local store
+      if (!chosenProxy) {
+        try {
+          const localList = this._loadLocalProxies();
+          if (Array.isArray(localList) && localList.length > 0) {
+            if (options.proxyId) {
+              chosenProxy = localList.find(p => p.id === options.proxyId);
+            }
+            if (!chosenProxy) {
+              chosenProxy = localList[Math.floor(Math.random() * localList.length)];
+            }
+            this._activeProxy = chosenProxy;
+            const authInfo = chosenProxy.username ? ` | User: ${chosenProxy.username}` : " | No Auth";
+            console.log(`🌐 [Proxy ShardX Local] Đã chọn Proxy: [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | Country: ${chosenProxy.country || 'N/A'}`);
+          } else {
+            const { data: proxies } = await axios.get(`${this._launcherApiUrl}/proxies`, { headers: this._headers, timeout: 3000 });
+            if (Array.isArray(proxies) && proxies.length > 0) {
+              chosenProxy = proxies[Math.floor(Math.random() * proxies.length)];
+              this._activeProxy = chosenProxy;
+            }
+          }
+        } catch (proxyErr) {
+          console.log(`🌐 [Network] Chạy IP Direct (${proxyErr.message}).`);
+        }
       }
 
       // BƯỚC 2: SINH BỘ FINGERPRINT WINDOWS ĐỒNG NHẤT (CANVAS/WEBGL/AUDIO NOISE)
@@ -944,7 +957,7 @@ export class AiAgentRunner {
       const profilePayload = {
         name: `SHARDX-AUTO-${sessionSuffix}`,
         folder: "GitHub-Auto",
-        notes: `Tách biệt hoàn toàn | Proxy: ${chosenProxy ? chosenProxy.proxyString || `${chosenProxy.host}:${chosenProxy.port}` : 'Direct'} | Time: ${new Date().toLocaleTimeString()}`,
+        notes: `Tách biệt hoàn toàn | Proxy: ${chosenProxy ? chosenProxy.proxyString || `${chosenProxy.host}:${chosenProxy.port}` : 'Direct'} | ISP: ${chosenProxy?.isp || 'N/A'} | Time: ${new Date().toLocaleTimeString()}`,
         proxy: chosenProxy ? (chosenProxy.proxyString || `http://${chosenProxy.host}:${chosenProxy.port}`) : null,
         proxy_id: chosenProxy?.id || null,
         fingerprint: fpRes.fingerprint,
@@ -1159,63 +1172,94 @@ export class AiAgentRunner {
       console.log(`📧 [Gmail Tạo Lập]: ${this._accountState.email}`);
       console.log(`👤 [Username Tạo lập]: ${this._accountState.username}`);
 
-      // 3. Mở Form Đăng ký GitHub (https://github.com/signup?source=login)
-      console.log("\n[Bước 2] Mở Form Đăng ký GitHub https://github.com/signup?source=login...");
+      // 3. Mở trang chủ GitHub và Bấm nút Sign up
+      console.log("\n[Bước 2] Mở trang chủ GitHub https://github.com/ và bấm nút Sign up...");
       this._githubPage = firstPage;
       this._githubPage.setDefaultNavigationTimeout(120000);
       this._githubPage.setDefaultTimeout(120000);
 
-      const maxRetries = 10;
       let isFormReady = false;
+      const maxRetries = 5;
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-          console.log(`⏳ [Tải trang Đăng ký] Lần thử ${attempt}/${maxRetries}...`);
-          if (attempt === 1) {
+          console.log(`⏳ [Tải trang chủ GitHub] Lần thử ${attempt}/${maxRetries}...`);
+          await this._githubPage.goto("https://github.com/", {
+            waitUntil: "domcontentloaded",
+            timeout: 60000,
+          });
+
+          await this._safeSleep(2000);
+          await this._detectAndCloseOverlays(this._githubPage);
+
+          // Bấm nút Sign up trên giao diện trang chủ GitHub
+          console.log("-> Bấm nút 'Sign up' trên giao diện GitHub...");
+          const clicked = await this._githubPage.evaluate(() => {
+            const elements = Array.from(document.querySelectorAll("a, button"));
+            const signupBtn = elements.find((el) => {
+              const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
+              const href = el.getAttribute("href") || "";
+              return (txt === "sign up" || txt === "sign up for github" || href.includes("/signup") || href.includes("/join")) && !txt.includes("copilot");
+            });
+            if (signupBtn) {
+              signupBtn.click();
+              return true;
+            }
+            return false;
+          });
+
+          if (!clicked) {
+            console.log("-> Thử chuyển trực tiếp sang /signup?source=login...");
             await this._githubPage.goto("https://github.com/signup?source=login", {
               waitUntil: "domcontentloaded",
               timeout: 60000,
-            });
-          } else {
-            console.log(`🔄 [Reload trang] Chờ 5s và tải lại trang đăng ký GitHub (Lần ${attempt})...`);
-            await this._safeSleep(5000);
-            await this._githubPage.reload({ waitUntil: "domcontentloaded", timeout: 60000 }).catch(async () => {
-              await this._githubPage.goto("https://github.com/signup?source=login", { waitUntil: "domcontentloaded", timeout: 60000 });
-            });
+            }).catch(() => {});
           }
 
-          // Chờ mạng ổn định và xử lý overlay nếu có
-          await this._safeSleep(3000);
-          await this._detectAndCloseOverlays(this._githubPage);
+          // Polling chờ ô nhập email hoặc form sẵn sàng (tối đa 40s)
+          const waitStart = Date.now();
+          while (Date.now() - waitStart < 40000) {
+            await this._safeSleep(1500);
 
-          // Kiểm tra nếu bị trang chặn Rate-Limit
-          const blockText = await this._githubPage.evaluate(() => {
-            const body = document.body ? document.body.innerText : "";
-            if (body.includes("Truy cập tạm thời bị hạn chế") || body.includes("Access restricted") || body.includes("robot on the same network")) {
-              return body;
+            try {
+              await this._githubPage.mouse.move(100 + Math.random() * 400, 100 + Math.random() * 300, { steps: 5 });
+            } catch {}
+
+            const pageState = await this._githubPage.evaluate(() => {
+              const body = document.body ? document.body.innerText : "";
+              const emailInput = document.querySelector("#email, input[type='email'], input[name='user[email]'], input[autocomplete='email']");
+              const hasEmailInput = !!emailInput;
+              const isRateLimited = body.includes("Truy cập tạm thời bị hạn chế") || body.includes("Access restricted") || body.includes("robot on the same network");
+
+              return {
+                hasEmailInput,
+                isRateLimited,
+                title: document.title,
+              };
+            }).catch(() => ({ hasEmailInput: false, isRateLimited: false }));
+
+            if (pageState.isRateLimited) {
+              console.warn("\n⚠️ [CẢNH BÁO RATE-LIMIT]: IP hiện tại đang bị GitHub hạn chế tạm thời!");
+              throw new Error("GitHub tạm thời hạn chế truy cập từ IP này (Rate Limit). Vui lòng đổi Proxy mới!");
             }
-            return null;
-          }).catch(() => null);
 
-          if (blockText) {
-            console.warn("\n⚠️ [CẢNH BÁO RATE-LIMIT]: IP hiện tại đang bị GitHub hạn chế tạm thời do tạo tài khoản liên tiếp!");
-            console.warn("💡 [Giải pháp]: Đổi sang 1 Proxy khác trong ShardBrowser hoặc chờ 3 - 5 phút để IP tự giải phóng.");
-            throw new Error("GitHub tạm thời hạn chế truy cập từ IP này (Rate Limit). Vui lòng đổi Proxy mới!");
+            if (pageState.hasEmailInput) {
+              isFormReady = true;
+              console.log("✅ [Trang Sẵn Sàng] Form đăng ký GitHub đã tải hoàn tất và sẵn sàng nhập liệu!");
+              break;
+            }
           }
 
-          // Chờ ô email xuất hiện (Timeout 25s mỗi lần thử)
-          await this._githubPage.waitForSelector("#email, input[type='email'], input[name='user[email]'], input[autocomplete='email']", {
-            visible: true,
-            timeout: 25000,
-          });
+          if (isFormReady) break;
 
-          isFormReady = true;
-          console.log("✅ [Trang Sẵn Sàng] Form đăng ký GitHub đã tải hoàn tất!");
-          break;
+          if (attempt < maxRetries) {
+            console.log(`🔄 [Thử lại ${attempt}] Tải lại trang...`);
+            await this._safeSleep(3000);
+          }
         } catch (loadErr) {
           if (loadErr.message.includes("Rate Limit")) throw loadErr;
-          console.warn(`⚠️ [Thử lại ${attempt}/${maxRetries}] Chưa thấy ô nhập Email (${loadErr.message}).`);
-          await this._safeSleep(4000);
+          console.warn(`⚠️ [Thử lại ${attempt}/${maxRetries}] Lỗi tải trang: ${loadErr.message}`);
+          await this._safeSleep(5000);
         }
       }
 

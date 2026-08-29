@@ -1651,11 +1651,18 @@ fn show_main_window(app: &tauri::AppHandle) {
 }
 
 pub fn run() {
-    tauri::Builder::default()
-        // Must be the first plugin: a second launch focuses the running window.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(not(debug_assertions))]
+    {
+        // Trong Release build: Ngăn mở nhiều instance
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             show_main_window(app);
-        }))
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())

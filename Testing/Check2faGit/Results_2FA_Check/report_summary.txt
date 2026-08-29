@@ -1,0 +1,15 @@
+==============================================================================
+🎉 BÁO CÁO KẾT QUẢ KIỂM TRA 2FA GITHUB
+==============================================================================
+- Thời gian thực hiện: 8/29/2026, 4:22:48 PM
+- Tổng thời gian quét: 1008 giây
+- Tổng số tài khoản: 59
+
+📊 THỐNG KÊ CHI TIẾT:
+   ✅ 2FA ĐÚNG (VALID):     52  -> file: github_2fa_VALID.txt
+   ❌ 2FA SAI (INVALID):    6  -> file: github_2fa_INVALID.txt
+   ⚠️ Sai Password:        0  -> file: github_wrong_password.txt
+   ℹ️ Chưa bật 2FA:         1  -> file: github_no_2fa.txt
+   🚫 Bị khóa / Flagged:   0  -> file: github_flagged.txt
+   ⚠️ Lỗi kết nối / Khác:  0  -> file: github_check_errors.txt
+==============================================================================

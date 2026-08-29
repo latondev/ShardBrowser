@@ -1,0 +1,13 @@
+{
+  "name": "tabitoken-automation",
+  "private": true,
+  "version": "1.0.0",
+  "description": "JavaScript Playwright automation for Tabi Token",
+  "main": "tabitoken_automation.js",
+  "scripts": {
+    "start": "node tabitoken_automation.js"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}

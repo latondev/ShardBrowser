@@ -8,9 +8,9 @@
  * - Tự động lưu tài khoản vào output.txt và bắn về Web Dashboard qua API.
  * 
  * Cách dùng:
- *   node batch_runner.js           # Chạy vô hạn liên tục (Default)
- *   node batch_runner.js 0 10      # Chạy vô hạn, nghỉ 10s giữa mỗi acc
- *   node batch_runner.js 500 15    # Chạy 500 tài khoản, nghỉ 15s giữa mỗi acc
+ *   node batch_runner.js           # Chạy vô hạn liên tục, nghỉ 30s giữa mỗi acc (Default)
+ *   node batch_runner.js 0 30      # Chạy vô hạn, nghỉ 30s giữa mỗi acc
+ *   node batch_runner.js 500 30    # Chạy 500 tài khoản, nghỉ 30s giữa mỗi acc
  * ==============================================================================
  */
 
@@ -19,17 +19,17 @@ import { AiAgentRunner } from "./ai_agent_runner.js";
 export class BatchRunner {
   // Private / Protected Properties
   _totalTarget = Infinity; // Mặc định chạy vô hạn
-  _cooldownSeconds = 10;
+  _cooldownSeconds = 30; // Mặc định nghỉ 30s mỗi lần tạo 1 acc
   _successCount = 0;
   _failedCount = 0;
   _currentRunner = null;
   _isStopping = false;
   _history = [];
 
-  constructor(totalTarget = 0, cooldownSeconds = 10) {
+  constructor(totalTarget = 0, cooldownSeconds = 30) {
     const num = Number(totalTarget);
     this._totalTarget = (!num || num <= 0) ? Infinity : num;
-    this._cooldownSeconds = Number(cooldownSeconds) || 10;
+    this._cooldownSeconds = Number(cooldownSeconds) || 30;
 
     // Lắng nghe tín hiệu dừng an toàn (Ctrl + C)
     process.on("SIGINT", async () => {
@@ -185,7 +185,7 @@ export class BatchRunner {
 async function main() {
   const args = process.argv.slice(2);
   const targetCount = parseInt(args[0] || process.env.BATCH_COUNT || "0", 10);
-  const cooldownSec = parseInt(args[1] || process.env.COOLDOWN_SEC || "10", 10);
+  const cooldownSec = parseInt(args[1] || process.env.COOLDOWN_SEC || "30", 10);
 
   const batch = new BatchRunner(targetCount, cooldownSec);
   await batch.run();
