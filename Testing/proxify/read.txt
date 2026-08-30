@@ -1,0 +1,8 @@
+# Chạy bộ lọc: HTTP, Elite, <= 500ms, lấy 100 dòng
+python Testing/proxify/proxify_scraper.py -p http -a elite -l 500 -n 100
+
+# Xuất ra file text danh sách IP:Port
+python Testing/proxify/proxify_scraper.py -p http -a elite -l 500 -n 100 -f ip:port -o Testing/proxify/proxies.txt
+
+# Xuất ra file protocol://IP:Port
+python Testing/proxify/proxify_scraper.py -p http -a elite -l 500 -n 100 -f protocol -o Testing/proxify/proxies_protocol.txt

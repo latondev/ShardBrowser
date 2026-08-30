@@ -278,6 +278,7 @@ type ProxyEntry = {
   password: string;
   country: string;
   notes: string;
+  folder?: string;
 };
 type Settings = {
   browser_path: string | null;
@@ -1723,36 +1724,6 @@ function BrowsersView() {
               <button className="btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear</button>
             </div>
           )}
-          {folder !== "all" && (
-            <button
-              className="btn-ghost"
-              onClick={() => exportGroupToZip(folder)}
-              title={`Export group “${folder}” and all cookies into a .zip archive`}
-            >
-              <Icon.Upload /> Export Group (.zip)
-            </button>
-          )}
-          <button
-            className="btn-ghost"
-            onClick={() => importGroupFromZip(folder !== "all" ? folder : undefined)}
-            title="Import group & cookies from a .zip archive"
-          >
-            <Icon.Download /> Import ZIP
-          </button>
-          <button
-            className="btn-ghost"
-            onClick={() => importProfilesFromFile(folder !== "all" ? folder : undefined)}
-            title="Import profiles from a JSON file"
-          >
-            <Icon.Download /> Import JSON
-          </button>
-          <button
-            className="btn-ghost"
-            onClick={() => bulkImport(folder !== "all" ? folder : undefined)}
-            title="Import profiles from exported JSON in the clipboard"
-          >
-            <Icon.Clone /> Paste JSON
-          </button>
           <button className="btn-ghost" onClick={() => setTemplatePickerOpen(true)}><ShardMini /> From template</button>
           <button className="btn-primary" onClick={newProfile}>+ New profile</button>
         </div>
@@ -2820,15 +2791,122 @@ function ProxiesView() {
   const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null);
   const [profiles, setProfiles] = useState<ProfileMeta[]>([]);
   const [search, setSearch] = useState("");
+  const [folder, setFolder] = useState("all");
+  const [folderRegistry, setFolderRegistry] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("shardx-proxy-folders") || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [folderModal, setFolderModal] = useState<{ proxyIds: string[] } | null>(null);
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const ctx = useContextMenu();
+  const folderTabsRef = useRef<HTMLDivElement>(null);
 
-  // Search filter: matches name / host / port / country tag / notes / username
-  // *and* the exit IP from the latest snapshot (so the user can find a proxy
-  // by "last seen exiting at X.X.X.X").  Whitespace-trimmed, case-insensitive.
+  const rememberFolder = (f: string) =>
+    setFolderRegistry((r) => {
+      const next = r.includes(f) ? r : [...r, f];
+      localStorage.setItem("shardx-proxy-folders", JSON.stringify(next));
+      return next;
+    });
+
+  const forgetFolder = (f: string) =>
+    setFolderRegistry((r) => {
+      const next = r.filter((x) => x.toLowerCase() !== f.toLowerCase());
+      localStorage.setItem("shardx-proxy-folders", JSON.stringify(next));
+      return next;
+    });
+
+  const folders = useMemo(() => {
+    const set = new Set<string>(folderRegistry);
+    for (const p of proxies) {
+      if (p.folder) set.add(p.folder);
+    }
+    return ["all", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+  }, [proxies, folderRegistry]);
+
+  // Fall back to "all" when the active folder tab becomes empty.
+  useEffect(() => {
+    if (folder !== "all" && !folders.includes(folder)) setFolder("all");
+  }, [folders, folder]);
+
+  const setProxyFolder = async (ids: string[], f: string) => {
+    for (const id of ids) {
+      try {
+        await invoke("proxy_set_folder", { id, folder: f });
+      } catch (e) {
+        toast.err(String(e));
+      }
+    }
+    if (f) rememberFolder(f);
+    reload();
+    if (ids.length === 1) {
+      const p = proxies.find((x) => x.id === ids[0]);
+      const who = p ? p.name || `${p.host}:${p.port}` : "Proxy";
+      toast.ok(f ? `Moved “${who}” to “${f}”` : `Removed “${who}” from group`);
+    } else {
+      toast.ok(f ? `Moved ${ids.length} proxies to “${f}”` : `Removed ${ids.length} proxies from group`);
+    }
+  };
+
+  const bulkUnfile = async () => {
+    const ids = [...proxySel];
+    if (ids.length === 0) return;
+    await setProxyFolder(ids, "");
+    setProxySel(new Set());
+  };
+
+  const deleteFolder = async (f: string) => {
+    const targetFolder = f.trim();
+    const count = proxies.filter(
+      (p) => (p.folder || "").trim().toLowerCase() === targetFolder.toLowerCase(),
+    ).length;
+    const choice = await confirmModal({
+      title: `Delete group “${targetFolder}”`,
+      message:
+        count > 0
+          ? `This group has ${count} prox${count === 1 ? "y" : "ies"}. Delete them too, or keep them in “All”?`
+          : `Delete the empty group “${targetFolder}”?`,
+      buttons:
+        count > 0
+          ? [
+              { label: "Cancel", value: "cancel" },
+              { label: "Keep proxies (Move to All)", value: "keep" },
+              { label: "Delete group & proxies", value: "delete", danger: true },
+            ]
+          : [
+              { label: "Cancel", value: "cancel" },
+              { label: "Delete group", value: "keep", danger: true },
+            ],
+    });
+    if (choice == null || choice === "cancel") return;
+    const alsoDelete = choice === "delete";
+    try {
+      const n = await invoke<number>("proxy_folder_delete", { folder: targetFolder, deleteProxies: alsoDelete });
+      forgetFolder(targetFolder);
+      forgetFolder(f);
+      if (folder.toLowerCase() === targetFolder.toLowerCase()) setFolder("all");
+      await reload();
+      toast.ok(
+        alsoDelete
+          ? `Deleted group “${targetFolder}” + ${n} prox${n === 1 ? "y" : "ies"}`
+          : `Removed group “${targetFolder}” (${n} prox${n === 1 ? "y" : "ies"} kept in All)`,
+      );
+    } catch (e) {
+      toast.err(String(e));
+    }
+  };
+
+  // Search and Folder filter
   const filteredProxies = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return proxies;
-    return proxies.filter((p) => {
+    let list = proxies;
+    if (folder !== "all") {
+      list = list.filter((p) => (p.folder || "").trim().toLowerCase() === folder.trim().toLowerCase());
+    }
+    if (!q) return list;
+    return list.filter((p) => {
       const ip = (snapshots[p.id]?.ip ?? "").toLowerCase();
       const city = (snapshots[p.id]?.city ?? "").toLowerCase();
       const isp = (snapshots[p.id]?.isp ?? "").toLowerCase();
@@ -2837,6 +2915,7 @@ function ProxiesView() {
         p.host.toLowerCase().includes(q) ||
         String(p.port).includes(q) ||
         p.country.toLowerCase().includes(q) ||
+        (p.folder || "").toLowerCase().includes(q) ||
         p.notes.toLowerCase().includes(q) ||
         p.username.toLowerCase().includes(q) ||
         ip.includes(q) ||
@@ -2844,7 +2923,7 @@ function ProxiesView() {
         isp.includes(q)
       );
     });
-  }, [proxies, snapshots, search]);
+  }, [proxies, snapshots, search, folder]);
 
   // Pagination over the filtered list.
   const PROXY_PAGE_SIZE = 20;
@@ -2853,8 +2932,8 @@ function ProxiesView() {
   useEffect(() => {
     if (proxyPage > proxyPageCount) setProxyPage(proxyPageCount);
   }, [proxyPageCount, proxyPage]);
-  // Reset to page 1 when the search narrows the list to fewer pages.
-  useEffect(() => { setProxyPage(1); }, [search]);
+  // Reset to page 1 when the search narrows the list or folder changes.
+  useEffect(() => { setProxyPage(1); }, [search, folder]);
   const pagedProxies = useMemo(
     () => filteredProxies.slice((proxyPage - 1) * PROXY_PAGE_SIZE, proxyPage * PROXY_PAGE_SIZE),
     [filteredProxies, proxyPage],
@@ -2936,6 +3015,133 @@ function ProxiesView() {
     catch (e) { toast.err(String(e)); }
   };
 
+  const [cleaning, setCleaning] = useState(false);
+
+  // Check all proxies in a group (or "all"), delete dead ones and keep active ones.
+  const checkAndCleanGroup = async (targetFolder: string) => {
+    if (cleaning) return;
+    const isAll = targetFolder === "all";
+    const targets = isAll
+      ? proxies
+      : proxies.filter((p) => (p.folder || "").trim().toLowerCase() === targetFolder.trim().toLowerCase());
+
+    if (targets.length === 0) {
+      toast.info(isAll ? "No proxies to check" : `No proxies in group “${targetFolder}”`);
+      return;
+    }
+
+    const groupLabel = isAll ? "All proxies" : `group “${targetFolder}”`;
+    const choice = await confirmModal({
+      title: `Check & Clean — ${groupLabel}`,
+      message: `Test all ${targets.length} proxies in ${groupLabel}? Any proxy that fails connection will be permanently removed. Active proxies will be kept.`,
+      danger: true,
+      buttons: [
+        { label: "Cancel", value: "cancel" },
+        { label: `Check & Clean (${targets.length})`, value: "clean", danger: true },
+      ],
+    });
+    if (choice !== "clean") return;
+
+    setCleaning(true);
+    toast.info(`Checking ${targets.length} proxies in ${groupLabel}…`);
+
+    const CONCURRENCY = 6;
+    let cursor = 0;
+    let deadCount = 0;
+    let activeCount = 0;
+
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, targets.length) }, async () => {
+        while (cursor < targets.length) {
+          const p = targets[cursor++];
+          if (!p) break;
+          setBusy((s) => ({ ...s, [p.id]: true }));
+          try {
+            const snap = await invoke<ProxyTestSnapshot>("proxy_full_test", { entry: p });
+            if (snap && snap.tcp_ms != null) {
+              setSnapshots((s) => ({ ...s, [p.id]: snap }));
+              activeCount++;
+            } else {
+              await invoke("proxy_delete", { id: p.id });
+              deadCount++;
+            }
+          } catch {
+            try {
+              await invoke("proxy_delete", { id: p.id });
+            } catch {}
+            deadCount++;
+          } finally {
+            setBusy((s) => ({ ...s, [p.id]: false }));
+          }
+        }
+      }),
+    );
+
+    setCleaning(false);
+    await reload();
+    toast.ok(`Clean complete: removed ${deadCount} dead, kept ${activeCount} active in ${groupLabel}`);
+  };
+
+  // Check selected proxies, delete dead ones and keep active ones.
+  const bulkCheckAndClean = async () => {
+    if (cleaning) return;
+    const ids = [...proxySel];
+    if (ids.length === 0) return;
+    const targets = proxies.filter((p) => proxySel.has(p.id));
+    if (targets.length === 0) return;
+
+    const choice = await confirmModal({
+      title: "Check & Clean Selected Proxies",
+      message: `Test ${targets.length} selected proxies? Any proxy that fails connection will be permanently deleted. Active proxies will be kept.`,
+      danger: true,
+      buttons: [
+        { label: "Cancel", value: "cancel" },
+        { label: `Check & Clean (${targets.length})`, value: "clean", danger: true },
+      ],
+    });
+    if (choice !== "clean") return;
+
+    setCleaning(true);
+    toast.info(`Checking ${targets.length} selected proxies…`);
+
+    const CONCURRENCY = 6;
+    let cursor = 0;
+    let deadCount = 0;
+    let activeCount = 0;
+
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, targets.length) }, async () => {
+        while (cursor < targets.length) {
+          const p = targets[cursor++];
+          if (!p) break;
+          setBusy((s) => ({ ...s, [p.id]: true }));
+          try {
+            const snap = await invoke<ProxyTestSnapshot>("proxy_full_test", { entry: p });
+            if (snap && snap.tcp_ms != null) {
+              setSnapshots((s) => ({ ...s, [p.id]: snap }));
+              activeCount++;
+            } else {
+              await invoke("proxy_delete", { id: p.id });
+              deadCount++;
+            }
+          } catch {
+            try {
+              await invoke("proxy_delete", { id: p.id });
+            } catch {}
+            deadCount++;
+          } finally {
+            setBusy((s) => ({ ...s, [p.id]: false }));
+          }
+        }
+      }),
+    );
+
+    setCleaning(false);
+    setProxySel(new Set());
+    await reload();
+    toast.ok(`Clean complete: removed ${deadCount} dead, kept ${activeCount} active`);
+  };
+
   // Capped-parallel bulk TCP/UDP/geo to avoid socket fan-out.
   const bulkTest = async () => {
     const ids = [...proxySel];
@@ -2976,7 +3182,8 @@ function ProxiesView() {
       const auth = p.username || p.password ? `${p.username}:${p.password}@` : "";
       const base = `${p.kind}://${auth}${p.host}:${p.port}`;
       const tag = p.country ? `  # country=${p.country}` : "";
-      return base + tag;
+      const grp = p.folder ? ` folder=${p.folder}` : "";
+      return base + tag + grp;
     });
     const text = lines.join("\n");
     clip.write(text).then(
@@ -2996,25 +3203,77 @@ function ProxiesView() {
     } catch (e) { toast.err("Import failed: " + String(e)); }
   };
 
+  const existingFolderList = useMemo(() => folders.filter((f) => f !== "all"), [folders]);
+
   return (
     <section className="page">
       <Topbar crumbs={["Workspace", "Proxies"]} search={search} onSearch={setSearch} />
       <div className="page-title">
-        <h1>Proxies</h1>
+        <div className="title-with-tabs">
+          <h1>Proxies</h1>
+          <div className="folder-tabs" ref={folderTabsRef}>
+            <button
+              className={`folder-tab ${folder === "all" ? "active" : ""}`}
+              onClick={() => setFolder("all")}
+              onContextMenu={(e) =>
+                ctx.open(e, [
+                  { label: "Check & clean dead (All)…", onClick: () => checkAndCleanGroup("all") },
+                ])
+              }
+            >
+              All <span className="tab-count">{proxies.length}</span>
+            </button>
+            {existingFolderList.map((f) => {
+              const count = proxies.filter(
+                (p) => (p.folder || "").trim().toLowerCase() === f.trim().toLowerCase(),
+              ).length;
+              return (
+                <button
+                  key={f}
+                  className={`folder-tab ${folder === f ? "active" : ""}`}
+                  onClick={() => setFolder(f)}
+                  onContextMenu={(e) =>
+                    ctx.open(e, [
+                      { label: "Check & clean dead…", onClick: () => checkAndCleanGroup(f) },
+                      { label: "Rename group…", onClick: () => setRenamingFolder(f) },
+                      { sep: true, label: "", onClick: () => {} },
+                      { label: "Delete group…", onClick: () => deleteFolder(f), danger: true },
+                    ])
+                  }
+                >
+                  {f} <span className="tab-count">{count}</span>
+                </button>
+              );
+            })}
+            <button
+              className="folder-tab-add"
+              title="Create a new group"
+              onClick={() => setFolderModal({ proxyIds: [] })}
+            >
+              +
+            </button>
+          </div>
+        </div>
         <div className="page-actions">
           {proxySel.size > 0 && (
             <div className="bulk-bar">
               <span>{proxySel.size} selected</span>
-              <button className="btn-ghost btn-sm" onClick={bulkTest}><Icon.Refresh /> Test</button>
+              <button className="btn-ghost btn-sm" onClick={bulkTest} disabled={cleaning}><Icon.Refresh /> Test</button>
+              <button className="btn-ghost btn-sm" onClick={bulkCheckAndClean} disabled={cleaning} title="Test selected and remove dead ones">
+                <Icon.Refresh /> Check & clean
+              </button>
+              <button className="btn-ghost btn-sm" onClick={() => setFolderModal({ proxyIds: [...proxySel] })}>
+                <Icon.Folder /> Move to group…
+              </button>
+              <button className="btn-ghost btn-sm" onClick={bulkUnfile} title="Remove selected from their groups">
+                Remove from group
+              </button>
               <button className="btn-ghost btn-sm" onClick={bulkExport}><Icon.Upload /> Export</button>
               <button className="btn-ghost btn-sm" onClick={bulkDelete}><Icon.Trash /> Delete</button>
               <button className="btn-ghost btn-sm" onClick={() => setProxySel(new Set())}>Clear</button>
             </div>
           )}
-          {/* Promo: routes to ProxyShard's UDP / p0f-spoofed residential
-              pool — the proxies that actually make ShardX's QUIC +
-              WebRTC stack work end-to-end.  Sits next to Import / New
-              proxy so it's discoverable without opening any dialog. */}
+          {/* Promo: routes to ProxyShard's UDP / p0f-spoofed residential pool */}
           <button
             className="proxy-buy-cta"
             onClick={() => { openUrl(withUtm("https://proxyshard.com")).catch(() => {}); }}
@@ -3022,10 +3281,71 @@ function ProxiesView() {
           >
             <ShardMini /> Buy proxies <span className="muted">— UDP + p0f</span>
           </button>
+          <button
+            className="btn-ghost"
+            onClick={() => checkAndCleanGroup(folder)}
+            disabled={cleaning}
+            title={folder === "all" ? "Test all proxies and delete dead ones" : `Test proxies in group “${folder}” and delete dead ones`}
+          >
+            <Icon.Refresh /> {cleaning ? "Checking…" : folder === "all" ? "Check & clean" : `Check & clean (${folder})`}
+          </button>
           <button className="btn-ghost" onClick={bulkImportClipboard} title="Import proxies from the clipboard"><Icon.Download /> Import</button>
           <button className="btn-primary" onClick={() => setBulkOpen(true)}>+ New proxy</button>
         </div>
       </div>
+
+      {folderModal && (() => {
+        const isMoving = folderModal.proxyIds.length > 0;
+        const targetProxies = proxies.filter((p) => folderModal.proxyIds.includes(p.id));
+        const currentFolder = targetProxies.length === 1 ? targetProxies[0].folder : undefined;
+        const pickable = folders.filter((f) => f !== "all" && f !== currentFolder);
+        const assign = (f: string) => {
+          if (folderModal.proxyIds.length > 0) {
+            setProxyFolder(folderModal.proxyIds, f);
+          } else {
+            rememberFolder(f);
+            setFolder(f);
+          }
+          setFolderModal(null);
+        };
+        return (
+          <FolderModal
+            mode={isMoving ? "move" : "create"}
+            existing={pickable}
+            onPick={assign}
+            onCreate={(name) => {
+              const f = name.trim();
+              if (f) assign(f);
+            }}
+            onClose={() => setFolderModal(null)}
+          />
+        );
+      })()}
+
+      {renamingFolder && (
+        <FolderModal
+          mode="rename"
+          initialName={renamingFolder}
+          existing={existingFolderList}
+          onCreate={async (next) => {
+            const oldName = renamingFolder;
+            setRenamingFolder(null);
+            if (!next || next === oldName) return;
+            try {
+              const n = await invoke<number>("proxy_folder_rename", { old: oldName, new: next });
+              rememberFolder(next);
+              forgetFolder(oldName);
+              if (folder.toLowerCase() === oldName.toLowerCase()) setFolder(next);
+              await reload();
+              toast.ok(`Renamed group “${oldName}” → “${next}” (${n} prox${n === 1 ? "y" : "ies"} updated)`);
+            } catch (e) {
+              toast.err(String(e));
+            }
+          }}
+          onClose={() => setRenamingFolder(null)}
+        />
+      )}
+
       <div className="rows">
         <div className="rows-head p-cols">
           <div>
@@ -3067,6 +3387,10 @@ function ProxiesView() {
               onContextMenu={(e) =>
                 ctx.open(e, [
                   { label: "Test (TCP/UDP/geo)", onClick: () => fullTest(p) },
+                  { label: "Move to group…", onClick: () => setFolderModal({ proxyIds: [p.id] }) },
+                  ...(p.folder
+                    ? [{ label: "Remove from group", onClick: () => setProxyFolder([p.id], "") }]
+                    : []),
                   { label: "View details", onClick: () => setInfoFor({ proxy: p, anchor: { x: e.clientX, y: e.clientY } }) },
                   { label: "Edit", onClick: () => setEditing(p) },
                   { sep: true, label: "", onClick: () => {} },
@@ -3102,13 +3426,36 @@ function ProxiesView() {
                       }}
                     />
                   ) : (
-                    <span
-                      className="cell-click"
-                      onClick={() => setRenaming({ id: p.id, draft: p.name })}
-                      title="Click to rename"
-                    >
-                      {p.name || "—"}
-                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <span
+                        className="cell-click"
+                        onClick={() => setRenaming({ id: p.id, draft: p.name })}
+                        title="Click to rename"
+                      >
+                        {p.name || "—"}
+                      </span>
+                      {p.folder && folder === "all" && (
+                        <span
+                          className="folder-badge"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFolder(p.folder!);
+                          }}
+                          title={`Group: ${p.folder} (Click to switch tab)`}
+                          style={{
+                            fontSize: "10px",
+                            padding: "1px 6px",
+                            borderRadius: "4px",
+                            background: "rgba(59, 130, 246, 0.15)",
+                            color: "#60a5fa",
+                            border: "1px solid rgba(59, 130, 246, 0.3)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {p.folder}
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div><span className={`badge badge-${p.kind}`}>{p.kind}</span></div>
@@ -3142,11 +3489,7 @@ function ProxiesView() {
                       >
                         {r.tcp_ms != null ? "Active" : "Failed"}
                       </span>
-                      {/* UDP pill: clickable to docs explaining what the
-                          presence/absence of UDP means for QUIC + WebRTC.
-                          Shown for any proxy type — HTTP proxies never
-                          have UDP, but the badge still tells the user why
-                          QUIC will be force-disabled at launch. */}
+                      {/* UDP pill */}
                       {r.udp_ms != null && p.kind === "socks5" && (
                         <button
                           type="button"
@@ -3187,11 +3530,15 @@ function ProxiesView() {
             </div>
           );
         })}
-        {proxies.length === 0 && (
+        {filteredProxies.length === 0 && (
           <div className="empty-rich">
             <div className="empty-shard"><IconWire /></div>
-            <h3>No proxies yet</h3>
-            <p>Add a SOCKS5/HTTP(S) endpoint so profiles can route through it.</p>
+            <h3>{folder !== "all" ? `No proxies in “${folder}”` : "No proxies yet"}</h3>
+            <p>
+              {folder !== "all"
+                ? `Add or move proxies into the “${folder}” group to see them here.`
+                : "Add a SOCKS5/HTTP(S) endpoint so profiles can route through it."}
+            </p>
             <div className="empty-cta">
               <button className="btn-primary" onClick={() => setBulkOpen(true)}>+ New proxy</button>
             </div>
@@ -3202,13 +3549,31 @@ function ProxiesView() {
         <div className="pager">
           <button className="btn-ghost btn-sm" disabled={proxyPage <= 1}
             onClick={() => setProxyPage((p) => Math.max(1, p - 1))}>‹ Prev</button>
-          <span className="pager-info">Page {proxyPage} of {proxyPageCount} · {proxies.length} proxies</span>
+          <span className="pager-info">Page {proxyPage} of {proxyPageCount} · {filteredProxies.length} proxies</span>
           <button className="btn-ghost btn-sm" disabled={proxyPage >= proxyPageCount}
             onClick={() => setProxyPage((p) => Math.min(proxyPageCount, p + 1))}>Next ›</button>
         </div>
       )}
-      {editing && <ProxyEditor initial={editing} onClose={() => { setEditing(null); reload(); }} />}
-      {bulkOpen && <ProxyBulkImporter onClose={() => { setBulkOpen(false); reload(); }} />}
+      {editing && (
+        <ProxyEditor
+          initial={editing}
+          existingFolders={existingFolderList}
+          onClose={() => {
+            setEditing(null);
+            reload();
+          }}
+        />
+      )}
+      {bulkOpen && (
+        <ProxyBulkImporter
+          defaultFolder={folder !== "all" ? folder : ""}
+          existingFolders={existingFolderList}
+          onClose={() => {
+            setBulkOpen(false);
+            reload();
+          }}
+        />
+      )}
       {infoFor && (
         <ProxyInfoPopover
           proxy={infoFor.proxy}
@@ -3366,9 +3731,18 @@ type BulkRowState = {
 };
 
 /// Two-step bulk import: paste → parse → (optional Test-all + dedup) → Save selected.
-function ProxyBulkImporter({ onClose }: { onClose: () => void }) {
+function ProxyBulkImporter({
+  defaultFolder = "",
+  existingFolders = [],
+  onClose,
+}: {
+  defaultFolder?: string;
+  existingFolders?: string[];
+  onClose: () => void;
+}) {
   const [text, setText] = useState("");
   const [kind, setKind] = useState<ProxyEntry["kind"]>("socks5");
+  const [folder, setFolder] = useState(defaultFolder);
   const [rows, setRows] = useState<BulkRowState[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -3377,7 +3751,13 @@ function ProxyBulkImporter({ onClose }: { onClose: () => void }) {
     try {
       const parsed = await invoke<ProxyEntry[]>("proxy_bulk_parse", { text, kind });
       if (parsed.length === 0) { toast.err("No valid proxy lines found"); return; }
-      setRows(parsed.map((e) => ({ entry: e, selected: true, status: "idle" })));
+      setRows(
+        parsed.map((e) => ({
+          entry: { ...e, folder: e.folder || folder.trim() },
+          selected: true,
+          status: "idle",
+        })),
+      );
     } catch (e) { toast.err(String(e)); }
   };
 
@@ -3444,14 +3824,30 @@ function ProxyBulkImporter({ onClose }: { onClose: () => void }) {
         <div className="dialog-body">
           {rows.length === 0 ? (
             <>
-              <label>
-                <span className="lbl">Default type (used when a line has no scheme)</span>
-                <select value={kind} onChange={(e) => setKind(e.target.value as ProxyEntry["kind"])}>
-                  <option value="socks5">SOCKS5</option>
-                  <option value="http">HTTP</option>
-                  <option value="https">HTTPS</option>
-                </select>
-              </label>
+              <div className="form-row">
+                <label>
+                  <span className="lbl">Default type (used when a line has no scheme)</span>
+                  <select value={kind} onChange={(e) => setKind(e.target.value as ProxyEntry["kind"])}>
+                    <option value="socks5">SOCKS5</option>
+                    <option value="http">HTTP</option>
+                    <option value="https">HTTPS</option>
+                  </select>
+                </label>
+                <label>
+                  <span className="lbl">Group / Folder</span>
+                  <input
+                    value={folder}
+                    onChange={(e) => setFolder(e.target.value)}
+                    placeholder="e.g. US-Elite, Testing… (optional)"
+                    list="bulk-proxy-folders"
+                  />
+                  <datalist id="bulk-proxy-folders">
+                    {existingFolders.map((f) => (
+                      <option key={f} value={f} />
+                    ))}
+                  </datalist>
+                </label>
+              </div>
               <label>
                 <span className="lbl">Paste one proxy per line</span>
                 <textarea
@@ -3461,7 +3857,7 @@ function ProxyBulkImporter({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setText(e.target.value)}
                   placeholder={`socks5://user:pass@host:1080
 user:pass@host:1080
-host:1080:user:pass     # country=PL
+host:1080:user:pass     # country=PL folder=MyGroup
 host:8080               # no auth
 # lines starting with # are ignored`}
                 />
@@ -3559,7 +3955,15 @@ host:8080               # no auth
   );
 }
 
-function ProxyEditor({ initial, onClose }: { initial: ProxyEntry; onClose: () => void }) {
+function ProxyEditor({
+  initial,
+  existingFolders = [],
+  onClose,
+}: {
+  initial: ProxyEntry;
+  existingFolders?: string[];
+  onClose: () => void;
+}) {
   const [p, setP] = useState<ProxyEntry>(initial);
   // DC/ISP proxies imported from a ProxyShard order carry the order id in
   // notes — enables editing their p0f OS signature here.
@@ -3603,7 +4007,23 @@ function ProxyEditor({ initial, onClose }: { initial: ProxyEntry; onClose: () =>
           <button className="icon-btn" onClick={onClose}>✕</button>
         </header>
         <div className="dialog-body">
-          <Field label="Name" value={p.name} onChange={(v: string) => setP({ ...p, name: v })} />
+          <div className="form-row">
+            <Field label="Name" value={p.name} onChange={(v: string) => setP({ ...p, name: v })} />
+            <label>
+              <span className="lbl">Group / Folder</span>
+              <input
+                value={p.folder || ""}
+                onChange={(e) => setP({ ...p, folder: e.target.value })}
+                placeholder="e.g. US-Elite (optional)"
+                list="proxy-editor-folders"
+              />
+              <datalist id="proxy-editor-folders">
+                {existingFolders.map((f) => (
+                  <option key={f} value={f} />
+                ))}
+              </datalist>
+            </label>
+          </div>
           <div className="form-row">
             <label>
               <span className="lbl">Type</span>
@@ -3865,34 +4285,43 @@ function FingerprintImporter({ onClose }: { onClose: () => void }) {
   );
 }
 
-/// Folder picker/creator modal (replaces native prompt). mode: "create" | "move".
+/// Folder picker/creator/renamer modal. mode: "create" | "move" | "rename".
 function FolderModal({
-  mode, existing, onPick, onCreate, onClose,
+  mode, existing, initialName = "", onPick, onCreate, onClose,
 }: {
-  mode: "create" | "move";
+  mode: "create" | "move" | "rename";
   existing: string[];
-  onPick: (folder: string) => void;
+  initialName?: string;
+  onPick?: (folder: string) => void;
   onCreate: (name: string) => void;
   onClose: () => void;
 }) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
   const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { ref.current?.focus(); }, []);
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.focus();
+      if (mode === "rename") ref.current.select();
+    }
+  }, [mode]);
   const trimmed = name.trim();
-  const dup = existing.includes(trimmed);
+  const dup = existing.includes(trimmed) && trimmed.toLowerCase() !== initialName.trim().toLowerCase();
   const create = () => { if (trimmed && !dup) onCreate(trimmed); };
   const showList = mode === "move" && existing.length > 0;
+  const title = mode === "move" ? "Move to group" : mode === "rename" ? "Rename group" : "New group";
+  const actionLabel = mode === "move" ? (showList ? "Create & move" : "Move") : mode === "rename" ? "Rename" : "Create";
+
   return (
     <div className="dialog-bg" onClick={onClose}>
       <div className="dialog" onClick={(e) => e.stopPropagation()}>
         <header className="dialog-head">
-          <h2><ShardMini /> {mode === "move" ? "Move to folder" : "New folder"}</h2>
+          <h2><ShardMini /> {title}</h2>
           <button className="icon-btn" onClick={onClose}>✕</button>
         </header>
         <div className="dialog-body">
-          {showList && (
+          {showList && onPick && (
             <>
-              <span className="lbl">Existing folders</span>
+              <span className="lbl">Existing groups</span>
               <div className="folder-pick-list">
                 {existing.map((f) => (
                   <button key={f} className="folder-pick" onClick={() => onPick(f)}>
@@ -3904,7 +4333,7 @@ function FolderModal({
             </>
           )}
           <label>
-            <span className="lbl">{showList ? "New folder name" : "Folder name"}</span>
+            <span className="lbl">{showList ? "New group name" : "Group name"}</span>
             <input
               ref={ref}
               value={name}
@@ -3916,11 +4345,11 @@ function FolderModal({
               }}
             />
           </label>
-          {dup && <div className="muted small" style={{ color: "var(--err)" }}>Folder “{trimmed}” already exists.</div>}
+          {dup && <div className="muted small" style={{ color: "var(--err)" }}>Group “{trimmed}” already exists.</div>}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
             <button className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button className="btn-primary" disabled={!trimmed || dup} onClick={create}>
-              {showList ? "Create & move" : "Create"}
+            <button className="btn-primary" disabled={!trimmed || dup || (mode === "rename" && trimmed === initialName)} onClick={create}>
+              {actionLabel}
             </button>
           </div>
         </div>

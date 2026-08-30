@@ -23,6 +23,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { writeFile, appendFile, chmod } from "node:fs/promises";
 import { MailTmClient } from "./mailtm_client.js";
 import { GmailCreatorClient } from "./gmail_creator_client.js";
+import { HotmailGraphClient } from "./hotmail_graph_client.js";
 import { TotpClient } from "./totp_client.js";
 import { ProxyXoayClient } from "./proxyxoay_client.js";
 import { AccountStorageService } from "./account_storage.js";
@@ -80,8 +81,10 @@ export class AiAgentRunner {
   _profileId = null;
   _isCreatedProfile = false;
   _activeProxy = null;
+  _proxyMode = "rotate"; // "rotate" | "shard" | "direct"
   _gmailClient = null;
   _mailTm = null;
+  _hotmailClient = null;
   _activeEmailService = "gmail";
   _totp = null;
   _proxyXoay = null;
@@ -103,11 +106,23 @@ export class AiAgentRunner {
     this._launcherApiUrl = process.env.LAUNCHER_API_URL || liveConfig.url;
     this._launcherToken = process.env.LAUNCHER_API_TOKEN || liveConfig.token;
     this._headers = { Authorization: `Bearer ${this._launcherToken}` };
+    this._proxyMode = customConfig.proxyMode || process.env.PROXY_MODE || "rotate";
     this._gmailClient = new GmailCreatorClient(customConfig.rapidApiKey);
     this._mailTm = new MailTmClient();
     this._totp = new TotpClient();
     this._proxyXoay = new ProxyXoayClient();
     this._accountStorage = new AccountStorageService(customConfig.storageConfig);
+
+    if (customConfig.hotmailClient) {
+      this._hotmailClient = customConfig.hotmailClient;
+      this._activeEmailService = "hotmail";
+    } else if (customConfig.accountLine) {
+      this._hotmailClient = new HotmailGraphClient(customConfig.accountLine);
+      this._activeEmailService = "hotmail";
+    } else if (customConfig.emailService) {
+      this._activeEmailService = customConfig.emailService;
+    }
+
     const sessionSuffix = Date.now().toString().slice(-4);
     this._accountState.password = customConfig.password || `ShardX@2026!Pass#${sessionSuffix}`;
   }
@@ -910,20 +925,14 @@ export class AiAgentRunner {
       // BƯỚC 0: TỰ ĐỘNG XÓA SẠCH TOÀN BỘ PROFILE CŨ TRONG SHARDBROWSER
       await this._deleteAllOldProfiles();
 
-      // BƯỚC 1: XOAY PROXY MỚI TỪ PROXYXOAY.SHOP TRƯỚC KHI TẠO PROFILE
+      // BƯỚC 1: LỰA CHỌN PROXY THEO CHẾ ĐỘ CẤU HÌNH (direct | shard | rotate)
+      const effectiveMode = options.proxyMode || this._proxyMode || "rotate";
       let chosenProxy = null;
-      if (!options.disableProxyXoay && this._proxyXoay) {
-        try {
-          console.log("🌐 [ProxyXoay] Đang yêu cầu xoay IP Proxy mới từ proxyxoay.shop trước khi tạo Profile...");
-          chosenProxy = await this._proxyXoay.getNewProxy({ protocol: "http" });
-          this._activeProxy = chosenProxy;
-        } catch (pxErr) {
-          console.warn(`⚠️ [ProxyXoay Warning] Không thể lấy proxy xoay: ${pxErr.message}`);
-        }
-      }
 
-      // Fallback: Nếu không lấy được proxy xoay hoặc có proxyId chỉ định thì lấy từ ShardBrowser local store
-      if (!chosenProxy) {
+      if (effectiveMode === "direct") {
+        console.log("🌐 [Network Mode: DIRECT] Sử dụng IP mạng trực tiếp của máy tính (Không dùng Proxy).");
+      } else if (effectiveMode === "shard") {
+        console.log("🌐 [Network Mode: SHARD] Đang lấy Proxy có sẵn trong ShardBrowser...");
         try {
           const localList = this._loadLocalProxies();
           if (Array.isArray(localList) && localList.length > 0) {
@@ -941,10 +950,38 @@ export class AiAgentRunner {
             if (Array.isArray(proxies) && proxies.length > 0) {
               chosenProxy = proxies[Math.floor(Math.random() * proxies.length)];
               this._activeProxy = chosenProxy;
+              console.log(`🌐 [Proxy ShardX Remote] Đã chọn Proxy: ${chosenProxy.host}:${chosenProxy.port}`);
+            } else {
+              console.log("ℹ️ [ShardX] Không có proxy nào được lưu trong Shard -> Chạy IP Direct.");
             }
           }
         } catch (proxyErr) {
-          console.log(`🌐 [Network] Chạy IP Direct (${proxyErr.message}).`);
+          console.warn(`⚠️ [Proxy ShardX] Không lấy được proxy (${proxyErr.message}) -> Chạy IP Direct.`);
+        }
+      } else {
+        // "rotate" (mặc định)
+        if (!options.disableProxyXoay && this._proxyXoay) {
+          try {
+            console.log("🌐 [Network Mode: ROTATE] Đang yêu cầu xoay IP Proxy mới từ proxyxoay.shop...");
+            chosenProxy = await this._proxyXoay.getNewProxy({ protocol: "http" });
+            this._activeProxy = chosenProxy;
+          } catch (pxErr) {
+            console.warn(`⚠️ [ProxyXoay Warning] Không thể lấy proxy xoay: ${pxErr.message} -> Tìm proxy trong ShardBrowser...`);
+          }
+        }
+
+        // Fallback sang Proxy Shard nếu xoay thất bại
+        if (!chosenProxy) {
+          try {
+            const localList = this._loadLocalProxies();
+            if (Array.isArray(localList) && localList.length > 0) {
+              chosenProxy = localList[Math.floor(Math.random() * localList.length)];
+              this._activeProxy = chosenProxy;
+              console.log(`🌐 [Proxy ShardX Fallback] Chọn Proxy: [${chosenProxy.name || chosenProxy.host}]`);
+            }
+          } catch (proxyErr) {
+            console.log(`🌐 [Network] Chạy IP Direct (${proxyErr.message}).`);
+          }
         }
       }
 
@@ -1163,14 +1200,23 @@ export class AiAgentRunner {
         } catch {}
       });
 
-      // 2. Khởi tạo Email Thật @gmail.com qua GmailCreatorClient (Bảo đảm 100% không bị suspended)
-      console.log("\n[Bước 1] Khởi tạo Email @gmail.com thật từ RapidAPI...");
-      const acc = await this._gmailClient.createAccount();
-      this._activeEmailService = "gmail";
-      this._accountState.email = acc.address;
-      this._accountState.username = acc.username;
-      console.log(`📧 [Gmail Tạo Lập]: ${this._accountState.email}`);
-      console.log(`👤 [Username Tạo lập]: ${this._accountState.username}`);
+      // 2. Khởi tạo Email (Hotmail Graph API hoặc Gmail Creator hoặc Mail.tm)
+      if (this._activeEmailService === "hotmail" && this._hotmailClient) {
+        console.log("\n[Bước 1] Sử dụng tài khoản Hotmail/Outlook có sẵn qua Microsoft Graph API...");
+        this._accountState.email = this._hotmailClient.email;
+        const rawUser = this._accountState.email.split("@")[0].replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+        this._accountState.username = `user${rawUser.slice(0, 10)}${Math.random().toString(36).substring(2, 6)}`;
+        console.log(`📧 [Hotmail Email] : ${this._accountState.email}`);
+        console.log(`👤 [Username Tạo lập]: ${this._accountState.username}`);
+      } else {
+        console.log("\n[Bước 1] Khởi tạo Email @gmail.com thật từ RapidAPI...");
+        const acc = await this._gmailClient.createAccount();
+        this._activeEmailService = "gmail";
+        this._accountState.email = acc.address;
+        this._accountState.username = acc.username;
+        console.log(`📧 [Gmail Tạo Lập]  : ${this._accountState.email}`);
+        console.log(`👤 [Username Tạo lập]: ${this._accountState.username}`);
+      }
 
       // 3. Mở trang chủ GitHub và Bấm nút Sign up
       console.log("\n[Bước 2] Mở trang chủ GitHub https://github.com/ và bấm nút Sign up...");
@@ -1464,10 +1510,17 @@ export class AiAgentRunner {
         await this._safeSleep(2000);
       }
 
-      // 6. Xác thực OTP Email trực tiếp từ Gmail API / Mail.tm REST API
-      console.log(`\n[Bước 5] Đang lấy mã OTP trực tiếp từ ${this._activeEmailService === 'gmail' ? 'Gmail API' : 'Mail.tm'}...`);
+      // 6. Xác thực OTP Email trực tiếp từ Microsoft Graph API / Gmail API / Mail.tm
+      console.log(`\n[Bước 5] Đang lấy mã OTP trực tiếp từ ${this._activeEmailService === 'hotmail' ? 'Hotmail Graph API' : (this._activeEmailService === 'gmail' ? 'Gmail API' : 'Mail.tm')}...`);
       let result;
-      if (this._activeEmailService === "gmail") {
+      if (this._activeEmailService === "hotmail" && this._hotmailClient) {
+        const otpRes = await this._hotmailClient.waitForOtpCode({
+          filterSender: "github",
+          timeoutMs: 90000,
+          intervalMs: 2500,
+        });
+        result = { otpCode: otpRes.otpCode };
+      } else if (this._activeEmailService === "gmail") {
         result = await this._gmailClient.waitForVerificationCode(90, 3);
       } else {
         result = await this._mailTm.waitForVerificationCode(90, 2);

@@ -53,30 +53,40 @@ export class HotmailGraphClient {
 
   _parseFromString(accountLine) {
     if (!accountLine) return;
-    const parts = accountLine.trim().split("|");
-    this._email = parts[0] || null;
-    this._password = parts[1] || null;
-    this._refreshToken = parts[2] || null;
-    this._clientId = parts[3] || this._clientId;
-    this._recoveryEmail = parts[4] || null;
+    let clean = accountLine.trim();
+    if (clean.includes("\t")) {
+      const tabParts = clean.split("\t");
+      clean = tabParts[tabParts.length - 1].trim();
+    }
+    const parts = clean.split("|");
+    this._email = (parts[0] || "").trim() || null;
+    this._password = (parts[1] || "").trim() || null;
+    this._refreshToken = (parts[2] || "").trim() || null;
+    this._clientId = (parts[3] || "").trim() || this._clientId;
+    this._recoveryEmail = (parts[4] || "").trim() || null;
   }
 
   // Trích xuất mã OTP 6-8 chữ số từ nội dung email
   _extractOtpFromText(text) {
     if (!text) return null;
+    const clean = String(text).replace(/<[^>]+>/g, " ");
 
-    // Pattern 1: Tìm cụm từ chứa mã như "is 123456", "code: 123456", "OTP: 123456"
-    const patternContext = /(?:code|mã|verification|otp|pin|is|là)[:\s]+([0-9]{6,8})/i;
-    const matchContext = text.match(patternContext);
-    if (matchContext && matchContext[1]) {
-      return matchContext[1];
-    }
+    // Ưu tiên 1: Cụm từ định danh của GitHub
+    const launchMatch = clean.match(/(?:launch code|verification code|verify your account|security code|mã xác minh|mã xác thực)[^\d]{0,20}(\d{6,8})/i);
+    if (launchMatch && launchMatch[1]) return launchMatch[1].trim();
 
-    // Pattern 2: Tìm 6 chữ số đứng độc lập
-    const patternDigits = /\b([0-9]{6,8})\b/;
-    const matchDigits = text.match(patternDigits);
-    if (matchDigits && matchDigits[1]) {
-      return matchDigits[1];
+    // Ưu tiên 2: Cụm số nằm trong dấu ngoặc vuông [ 12345678 ]
+    const bracketMatch = clean.match(/\[\s*(\d{6,8})\s*\]/);
+    if (bracketMatch && bracketMatch[1]) return bracketMatch[1].trim();
+
+    // Ưu tiên 3: Bất kỳ chuỗi 6 hoặc 8 chữ số đứng độc lập (loại trừ năm 2024-2027)
+    const numMatches = clean.match(/\b\d{6,8}\b/g);
+    if (numMatches) {
+      for (const num of numMatches) {
+        if (!["2024", "2025", "2026", "2027"].includes(num)) {
+          return num.trim();
+        }
+      }
     }
 
     return null;

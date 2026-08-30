@@ -32,6 +32,9 @@ pub struct ProxyEntry {
     /// Free-form note.
     #[serde(default)]
     pub notes: String,
+    /// Folder / Group tag (empty string means ungrouped).
+    #[serde(default)]
+    pub folder: String,
 }
 
 impl ProxyEntry {
@@ -127,6 +130,79 @@ pub fn delete(id: &str) -> Result<()> {
 
 pub fn get(id: &str) -> Result<Option<ProxyEntry>> {
     Ok(load()?.proxies.into_iter().find(|p| p.id == id))
+}
+
+/// Load proxies matching a folder (or all if folder is empty or "all").
+#[allow(dead_code)]
+pub fn load_folder_proxies(folder: &str) -> Result<Vec<ProxyEntry>> {
+    let is_all = folder.is_empty() || folder.eq_ignore_ascii_case("all");
+    let all = list()?;
+    if is_all {
+        Ok(all)
+    } else {
+        Ok(all
+            .into_iter()
+            .filter(|p| p.folder.trim().eq_ignore_ascii_case(folder.trim()))
+            .collect())
+    }
+}
+
+/// Assign folder tag (empty string clears folder).
+pub fn set_folder(id: &str, folder: &str) -> Result<()> {
+    let mut s = load()?;
+    if let Some(p) = s.proxies.iter_mut().find(|p| p.id == id) {
+        p.folder = folder.trim().to_string();
+        save(&s)?;
+    }
+    Ok(())
+}
+
+/// Retag proxies from folder `old` to `new`; returns count.
+pub fn rename_folder(old: &str, new: &str) -> Result<usize> {
+    let old = old.trim();
+    let new = new.trim();
+    if old.is_empty() || old.eq_ignore_ascii_case("all") {
+        anyhow::bail!("cannot rename the 'all' folder");
+    }
+    let mut s = load()?;
+    let mut count = 0;
+    for p in s.proxies.iter_mut() {
+        if p.folder.trim().eq_ignore_ascii_case(old) {
+            p.folder = new.to_string();
+            count += 1;
+        }
+    }
+    if count > 0 {
+        save(&s)?;
+    }
+    Ok(count)
+}
+
+/// Delete folder; `delete_proxies` true removes, false unfiles (clears folder tag). Returns count.
+pub fn delete_folder(name: &str, delete_proxies: bool) -> Result<usize> {
+    let target = name.trim();
+    if target.is_empty() || target.eq_ignore_ascii_case("all") {
+        anyhow::bail!("cannot delete the 'all' folder");
+    }
+    let mut s = load()?;
+    let count = s
+        .proxies
+        .iter()
+        .filter(|p| p.folder.trim().eq_ignore_ascii_case(target))
+        .count();
+
+    if delete_proxies {
+        s.proxies
+            .retain(|p| !p.folder.trim().eq_ignore_ascii_case(target));
+    } else {
+        for p in s.proxies.iter_mut() {
+            if p.folder.trim().eq_ignore_ascii_case(target) {
+                p.folder = String::new();
+            }
+        }
+    }
+    save(&s)?;
+    Ok(count)
 }
 
 /// SOCKS5/HTTP CONNECT probe; returns RTT in ms on success.
@@ -268,12 +344,17 @@ fn parse_one(line: &str, default_kind: &ProxyKind) -> Option<ProxyEntry> {
     let port: u16 = port_s.parse().ok()?;
     let mut country = String::new();
     let mut notes = String::new();
+    let mut folder = String::new();
     if let Some(c) = comment {
         for kv in c.split_whitespace() {
             if let Some(v) = kv.strip_prefix("country=") {
                 country = v.to_string();
             } else if let Some(v) = kv.strip_prefix("note=") {
                 notes = v.to_string();
+            } else if let Some(v) = kv.strip_prefix("folder=") {
+                folder = v.to_string();
+            } else if let Some(v) = kv.strip_prefix("group=") {
+                folder = v.to_string();
             }
         }
     }
@@ -288,6 +369,7 @@ fn parse_one(line: &str, default_kind: &ProxyKind) -> Option<ProxyEntry> {
         password: pass,
         country,
         notes,
+        folder,
     })
 }
 

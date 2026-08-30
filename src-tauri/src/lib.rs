@@ -1324,6 +1324,27 @@ fn proxy_bulk_save(entries: Vec<proxy::ProxyEntry>) -> Result<usize, String> {
     proxy::bulk_save(entries).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn proxy_set_folder(id: String, folder: String) -> Result<(), String> {
+    proxy::set_folder(&id, &folder).map_err(|e| e.to_string())?;
+    crate::notify_store_changed("proxies");
+    Ok(())
+}
+
+#[tauri::command]
+fn proxy_folder_rename(old: String, new: String) -> Result<usize, String> {
+    let count = proxy::rename_folder(&old, &new).map_err(|e| e.to_string())?;
+    crate::notify_store_changed("proxies");
+    Ok(count)
+}
+
+#[tauri::command]
+fn proxy_folder_delete(folder: String, delete_proxies: bool) -> Result<usize, String> {
+    let count = proxy::delete_folder(&folder, delete_proxies).map_err(|e| e.to_string())?;
+    crate::notify_store_changed("proxies");
+    Ok(count)
+}
+
 // ---- Launcher ----
 
 #[tauri::command]
@@ -1718,6 +1739,9 @@ pub fn run() {
             proxy_bulk_import,
             proxy_bulk_parse,
             proxy_bulk_save,
+            proxy_set_folder,
+            proxy_folder_rename,
+            proxy_folder_delete,
             launch,
             settings_get,
             settings_save,

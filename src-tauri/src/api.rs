@@ -548,6 +548,7 @@ struct AddProxyReq {
     name: Option<String>,
     country: Option<String>,
     notes: Option<String>,
+    folder: Option<String>,
 }
 
 /// Add proxy (deduped by endpoint); returns summary.
@@ -578,6 +579,7 @@ async fn add_proxy(Json(body): Json<AddProxyReq>) -> ApiResult {
             password: body.password.clone().unwrap_or_default(),
             country: String::new(),
             notes: String::new(),
+            folder: String::new(),
         }
     };
     // metadata overrides (applied to parsed entries too).
@@ -590,6 +592,9 @@ async fn add_proxy(Json(body): Json<AddProxyReq>) -> ApiResult {
     if let Some(nt) = body.notes {
         entry.notes = nt;
     }
+    if let Some(f) = body.folder {
+        entry.folder = f;
+    }
     let stored = crate::proxy::upsert_dedup(entry)
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     crate::notify_store_changed("proxies");
@@ -600,6 +605,7 @@ async fn add_proxy(Json(body): Json<AddProxyReq>) -> ApiResult {
         "host": stored.host,
         "port": stored.port,
         "country": stored.country,
+        "folder": stored.folder,
     })))
 }
 

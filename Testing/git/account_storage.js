@@ -15,11 +15,15 @@
  * ==============================================================================
  */
 
-import "dotenv/config";
 import axios from "axios";
 import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { writeFile, appendFile, chmod } from "node:fs/promises";
+
+// Tự động nạp .env nếu có mà không cần thư viện dotenv bên ngoài
+if (typeof process.loadEnvFile === "function" && existsSync(path.join(process.cwd(), ".env"))) {
+  try { process.loadEnvFile(path.join(process.cwd(), ".env")); } catch {}
+}
 
 export class AccountStorageService {
   // Private / Protected Properties
