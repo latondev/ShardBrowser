@@ -7,7 +7,10 @@
   },
   "scripts": {
     "start": "node src/run_cloud.mjs",
+    "auto": "node auto_runner.mjs",
+    "start:shard": "node src/run_shard.mjs",
     "start:local": "node src/run_local.mjs",
+    "batch": "node batch_runner.mjs",
     "playwright": "node playwright_seekai.js",
     "test:seekai": "playwright test tests/seekai.full.spec.js"
   },

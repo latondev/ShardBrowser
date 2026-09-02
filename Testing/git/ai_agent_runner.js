@@ -82,6 +82,7 @@ export class AiAgentRunner {
   _isCreatedProfile = false;
   _activeProxy = null;
   _proxyMode = "rotate"; // "rotate" | "shard" | "direct"
+  _proxyGroup = "vn";
   _gmailClient = null;
   _mailTm = null;
   _hotmailClient = null;
@@ -107,6 +108,7 @@ export class AiAgentRunner {
     this._launcherToken = process.env.LAUNCHER_API_TOKEN || liveConfig.token;
     this._headers = { Authorization: `Bearer ${this._launcherToken}` };
     this._proxyMode = customConfig.proxyMode || process.env.PROXY_MODE || "rotate";
+    this._proxyGroup = customConfig.proxyGroup || process.env.PROXY_GROUP || "vn";
     this._gmailClient = new GmailCreatorClient(customConfig.rapidApiKey);
     this._mailTm = new MailTmClient();
     this._totp = new TotpClient();
@@ -932,25 +934,31 @@ export class AiAgentRunner {
       if (effectiveMode === "direct") {
         console.log("🌐 [Network Mode: DIRECT] Sử dụng IP mạng trực tiếp của máy tính (Không dùng Proxy).");
       } else if (effectiveMode === "shard") {
-        console.log("🌐 [Network Mode: SHARD] Đang lấy Proxy có sẵn trong ShardBrowser...");
+        const targetGroup = (options.proxyGroup || this._proxyGroup || "vn").trim().toLowerCase();
+        console.log(`🌐 [Network Mode: SHARD] Đang lấy Proxy thuộc nhóm [${targetGroup.toUpperCase()}] trong ShardBrowser...`);
         try {
           const localList = this._loadLocalProxies();
           if (Array.isArray(localList) && localList.length > 0) {
+            const groupProxies = localList.filter(p => (p.folder || "").trim().toLowerCase() === targetGroup);
+            const candidateList = groupProxies.length > 0 ? groupProxies : localList;
+
             if (options.proxyId) {
-              chosenProxy = localList.find(p => p.id === options.proxyId);
+              chosenProxy = candidateList.find(p => p.id === options.proxyId);
             }
             if (!chosenProxy) {
-              chosenProxy = localList[Math.floor(Math.random() * localList.length)];
+              chosenProxy = candidateList[Math.floor(Math.random() * candidateList.length)];
             }
             this._activeProxy = chosenProxy;
             const authInfo = chosenProxy.username ? ` | User: ${chosenProxy.username}` : " | No Auth";
-            console.log(`🌐 [Proxy ShardX Local] Đã chọn Proxy: [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | Country: ${chosenProxy.country || 'N/A'}`);
+            console.log(`🌐 [Proxy ShardX Local - Group: ${chosenProxy.folder || targetGroup}] Đã chọn Proxy: [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | Country: ${chosenProxy.country || 'VN'}`);
           } else {
             const { data: proxies } = await axios.get(`${this._launcherApiUrl}/proxies`, { headers: this._headers, timeout: 3000 });
             if (Array.isArray(proxies) && proxies.length > 0) {
-              chosenProxy = proxies[Math.floor(Math.random() * proxies.length)];
+              const groupProxies = proxies.filter(p => (p.folder || "").trim().toLowerCase() === targetGroup);
+              const candidateList = groupProxies.length > 0 ? groupProxies : proxies;
+              chosenProxy = candidateList[Math.floor(Math.random() * candidateList.length)];
               this._activeProxy = chosenProxy;
-              console.log(`🌐 [Proxy ShardX Remote] Đã chọn Proxy: ${chosenProxy.host}:${chosenProxy.port}`);
+              console.log(`🌐 [Proxy ShardX Remote - Group: ${chosenProxy.folder || targetGroup}] Đã chọn Proxy: ${chosenProxy.host}:${chosenProxy.port}`);
             } else {
               console.log("ℹ️ [ShardX] Không có proxy nào được lưu trong Shard -> Chạy IP Direct.");
             }
@@ -970,14 +978,17 @@ export class AiAgentRunner {
           }
         }
 
-        // Fallback sang Proxy Shard nếu xoay thất bại
+        // Fallback sang Proxy Shard (ưu tiên group vn) nếu xoay thất bại
         if (!chosenProxy) {
           try {
             const localList = this._loadLocalProxies();
             if (Array.isArray(localList) && localList.length > 0) {
-              chosenProxy = localList[Math.floor(Math.random() * localList.length)];
+              const targetGroup = (options.proxyGroup || this._proxyGroup || "vn").trim().toLowerCase();
+              const groupProxies = localList.filter(p => (p.folder || "").trim().toLowerCase() === targetGroup);
+              const candidateList = groupProxies.length > 0 ? groupProxies : localList;
+              chosenProxy = candidateList[Math.floor(Math.random() * candidateList.length)];
               this._activeProxy = chosenProxy;
-              console.log(`🌐 [Proxy ShardX Fallback] Chọn Proxy: [${chosenProxy.name || chosenProxy.host}]`);
+              console.log(`🌐 [Proxy ShardX Fallback - Group: ${chosenProxy.folder || targetGroup}] Chọn Proxy: [${chosenProxy.name || chosenProxy.host}]`);
             }
           } catch (proxyErr) {
             console.log(`🌐 [Network] Chạy IP Direct (${proxyErr.message}).`);

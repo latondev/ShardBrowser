@@ -1,0 +1,367 @@
+{
+  "domInfo": {
+    "url": "https://www.mailticking.com/",
+    "inputs": [
+      {
+        "id": "cf-chl-widget-60clq_response",
+        "className": "",
+        "value": "",
+        "placeholder": ""
+      }
+    ],
+    "buttons": [
+      {
+        "tag": "A",
+        "id": "",
+        "text": "Cloudflare",
+        "className": ""
+      },
+      {
+        "tag": "A",
+        "id": "",
+        "text": "Quyền riêng tư",
+        "className": "footer-text"
+      }
+    ],
+    "foundEmails": null,
+    "bodyTextSnippet": "www.mailticking.com\nThực hiện xác minh bảo mật\n\nTrang web này sử dụng dịch vụ bảo mật để chống bot độc hại. Trang này hiển thị trong khi trang web xác minh bạn không phải là bot.\n\nRay ID: a330ac7ea83cb41b\nHiệu suất và Tính bảo mật của Cloudflare\nQuyền riêng tư"
+  },
+  "networkLogs": [
+    {
+      "type": "REQUEST",
+      "method": "GET",
+      "url": "https://www.mailticking.com/",
+      "headers": {
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        "sec-ch-ua": "\"Chromium\";v=\"149\", \"Google Chrome\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"Windows\""
+      }
+    },
+    {
+      "type": "REQUEST",
+      "method": "GET",
+      "url": "https://www.mailticking.com/",
+      "headers": {
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        "sec-ch-ua": "\"Chromium\";v=\"149\", \"Google Chrome\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"Windows\""
+      }
+    },
+    {
+      "type": "REQUEST",
+      "method": "GET",
+      "url": "https://www.mailticking.com/cdn-cgi/speculation",
+      "headers": {
+        "origin": "https://www.mailticking.com",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "sec-ch-ua-full-version-list": "\"Chromium\";v=\"149.0.7827.103\", \"Google Chrome\";v=\"149.0.7827.103\", \"Not)A;Brand\";v=\"24.0.0.0\"",
+        "referer": "https://www.mailticking.com/",
+        "sec-ch-ua": "\"Chromium\";v=\"149\", \"Google Chrome\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
+        "sec-ch-ua-bitness": "\"64\"",
+        "sec-ch-ua-model": "\"\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-arch": "\"x86\"",
+        "sec-ch-ua-full-version": "\"149.0.7827.103\"",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        "sec-ch-ua-platform-version": "\"15.0.0\""
+      }
+    },
+    {
+      "type": "REQUEST",
+      "method": "GET",
+      "url": "https://www.mailticking.com/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1?ray=a330ac7ea83cb41b",
+      "headers": {
+        "sec-ch-ua-full-version-list": "\"Chromium\";v=\"149.0.7827.103\", \"Google Chrome\";v=\"149.0.7827.103\", \"Not)A;Brand\";v=\"24.0.0.0\"",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "referer": "https://www.mailticking.com/?__cf_chl_rt_tk=SmVRuGJwjg45RPGZ0ZY_oDZEYTNVM6a4R3p6N3SFXJo-1788060175-1.0.1.1-JL8HXjgxE3wb8zjSTLcLC_c6Ir3qKL4YE5WKOp2GbJw",
+        "sec-ch-ua": "\"Chromium\";v=\"149\", \"Google Chrome\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
+        "sec-ch-ua-bitness": "\"64\"",
+        "sec-ch-ua-model": "\"\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-arch": "\"x86\"",
+        "sec-ch-ua-full-version": "\"149.0.7827.103\"",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        "sec-ch-ua-platform-version": "\"15.0.0\""
+      }
+    },
+    {
+      "type": "RESPONSE",
+      "status": 403,
+      "url": "https://www.mailticking.com/",
+      "headers": {
+        "accept-ch": "Sec-CH-UA-Bitness, Sec-CH-UA-Arch, Sec-CH-UA-Full-Version, Sec-CH-UA-Mobile, Sec-CH-UA-Model, Sec-CH-UA-Platform-Version, Sec-CH-UA-Full-Version-List, Sec-CH-UA-Platform, Sec-CH-UA, UA-Bitness, UA-Arch, UA-Full-Version, UA-Mobile, UA-Model, UA-Platform-Version, UA-Platform, UA",
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cf-mitigated": "challenge",
+        "cf-ray": "a330ac7ea83cb41b-HKG",
+        "content-encoding": "zstd",
+        "content-security-policy": "default-src 'none'; script-src 'nonce-I56BfFDqkmZloqA7QeSNuo' 'unsafe-eval' https://challenges.cloudflare.com; script-src-attr 'none'; style-src 'unsafe-inline'; img-src 'self' https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; frame-src 'self' https://challenges.cloudflare.com blob:; child-src 'self' https://challenges.cloudflare.com blob:; worker-src blob:; form-action http: https:; base-uri 'self'",
+        "content-type": "text/html; charset=UTF-8",
+        "critical-ch": "Sec-CH-UA-Bitness, Sec-CH-UA-Arch, Sec-CH-UA-Full-Version, Sec-CH-UA-Mobile, Sec-CH-UA-Model, Sec-CH-UA-Platform-Version, Sec-CH-UA-Full-Version-List, Sec-CH-UA-Platform, Sec-CH-UA, UA-Bitness, UA-Arch, UA-Full-Version, UA-Mobile, UA-Model, UA-Platform-Version, UA-Platform, UA",
+        "cross-origin-embedder-policy": "require-corp",
+        "cross-origin-opener-policy": "same-origin",
+        "cross-origin-resource-policy": "same-origin",
+        "date": "Sun, 30 Aug 2026 03:22:55 GMT",
+        "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+        "origin-agent-cluster": "?1",
+        "permissions-policy": "accelerometer=(),camera=(),clipboard-read=(),clipboard-write=(),geolocation=(),gyroscope=(),hid=(),magnetometer=(),microphone=(),payment=(),publickey-credentials-get=(),screen-wake-lock=(),serial=(),sync-xhr=(),usb=(),xr-spatial-tracking=*",
+        "priority": "u=0,i",
+        "referrer-policy": "same-origin",
+        "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=rmOMnfQbqiJEx6UZ5t0lu0Z5YOxeUFaADqbyQ1MbsvePzKZvzrQ2zXnfy58gwBaMFcstLVSfkQjAPDAjaubbC3JNr3DhK%2Fmthh%2FlcfxM%2B6ZdSYq9kqHyT7xAFE9wXYR7lfqkPgA4\"}]}",
+        "server": "cloudflare",
+        "server-timing": "chlray;desc=\"a330ac7ea83cb41b\", cfExtPri",
+        "speculation-rules": "\"/cdn-cgi/speculation\"",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "SAMEORIGIN"
+      },
+      "body": "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"><meta http-equiv=\"X-UA-Compatible\" content=\"IE=Edge\"><meta name=\"robots\" content=\"noindex,nofollow\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"content-security-policy\" content=\"default-src &#39;none&#39;; script-src &#39;nonce-I56BfFDqkmZloqA7QeSNuo&#39; &#39;unsafe-eval&#39; https://challenges.cloudflare.com; script-src-attr &#39;none&#39;; style-src &#39;unsafe-inline&#39;; img-src &#39;self&#39; https://challenges.cloudflare.com; connect-src &#39;self&#39; https://challenges.cloudflare.com; frame-src &#39;self&#39; https://challenges.cloudflare.com blob:; child-src &#39;self&#39; https://challenges.cloudflare.com blob:; worker-src blob:; form-action http: https:; base-uri &#39;self&#39;\"><style>*{box-sizing:border-box;margin:0;padding:0}html{line-height:1.15;-webkit-text-size-adjust:100%;color:#313131;font"
+    },
+    {
+      "type": "RESPONSE",
+      "status": 200,
+      "url": "https://www.mailticking.com/cdn-cgi/speculation",
+      "headers": {
+        "access-control-allow-origin": "https://www.mailticking.com",
+        "cf-ray": "a330ac7f183eb41b-HKG",
+        "content-length": "151",
+        "content-type": "application/speculationrules+json",
+        "date": "Sun, 30 Aug 2026 03:22:55 GMT",
+        "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+        "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=0mhD2gl4%2FrXEvZy62Urp33vWlkaMWBViVQyQJVIWo8zpx%2BfAvvi0qflg7w7nwAk3jLF%2Flm3cRteFCTJdYvA9mQfZMX9Kjfz%2BSKDkFDAMzfCgnHsMySmxeZ35MeOjN3h5BV6knDZ7\"}]}",
+        "server": "cloudflare",
+        "speculation-rules": "\"/cdn-cgi/speculation\"",
+        "vary": "Origin"
+      },
+      "body": "{\"tag\":\"cf-speed-brain\",\"prefetch\":[{\"eagerness\":\"conservative\",\"source\":\"document\",\"where\":{\"and\":[{\"href_matches\":\"/*\",\"relative_to\":\"document\"}]}}]}"
+    },
+    {
+      "type": "RESPONSE",
+      "status": 200,
+      "url": "https://www.mailticking.com/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1?ray=a330ac7ea83cb41b",
+      "headers": {
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cache-control": "private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0",
+        "cf-ray": "a330ac7f4840b41b-HKG",
+        "content-encoding": "zstd",
+        "content-type": "application/javascript; charset=UTF-8",
+        "date": "Sun, 30 Aug 2026 03:22:55 GMT",
+        "priority": "u=3,i=?0",
+        "server": "cloudflare",
+        "server-timing": "cfExtPri"
+      },
+      "body": "window._cf_chl_opt.FRGD3=true;window._cf_chl_opt.qDREr1=false;window._cf_chl_opt.DEnd6=[];window._cf_chl_opt.BaSzz0=\"challenges.cloudflare.com\";window._cf_chl_opt.hJYUp7={\"Rahvf8\":{\"ACZr0\":\"https%3A%2F%2Fdevelopers.cloudflare.com%2Ffundamentals%2Fget-started%2Fconcepts%2Fcloudflare-challenges%2F%23browser-support\",\"kaMjx1\":\"https%3A%2F%2Funbotnet.me\",\"FkbdG0\":\"https%3A%2F%2Fwww.cloudflare.com%2Fprivacypolicy%2F\",\"TzEsj4\":\"%2Fcdn-cgi%2Fchallenge-platform%2Fhelp\"},\"LoFW3\":{\"bzZdd7\":\"N%E1%BA%BFu%20l%E1%BB%97i%20n%C3%A0y%20v%E1%BA%ABn%20c%C3%B2n%20sau%20khi%20b%E1%BA%A1n%20%C4%91%C3%A3%20ch%E1%BB%89nh%20s%E1%BB%ADa%20th%E1%BB%9Di%20gian%20c%E1%BB%A7a%20thi%E1%BA%BFt%20b%E1%BB%8B%2C%20h%C3%A3y%20tham%20kh%E1%BA%A3o%20%3Ca%20class%3D%22mhuTN5%22%3Et%C3%A0i%20li%E1%BB%87u%20kh%E1%BA%AFc%20ph%E1%BB%A5c%20s%E1%BB%B1%20c%E1%BB%91%3C%2Fa%3E%20c%E1%BB%A7a%20Cloudflare%20%C4%91%E1%BB%83%20nh%E1%BA%ADn%20th%C3%AAm%20tr%E1%BB%A3%20gi%C3%BAp.\",\"xdIiQ5\":\"Th%E1%BB%AD%20l%E1%BA%A1i%20sau.%20Trang%20web%2"
+    },
+    {
+      "type": "REQUEST",
+      "method": "GET",
+      "url": "blob:https://www.mailticking.com/ba31d41d-2f7f-4688-ae24-b79acc3c67b8",
+      "headers": {
+        "accept": "*/*"
+      }
+    },
+    {
+      "type": "REQUEST",
+      "method": "GET",
+      "url": "https://challenges.cloudflare.com/turnstile/v0/b/e694063b5082/api.js?onload=oNxb8&render=explicit",
+      "headers": {
+        "origin": "https://www.mailticking.com",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "referer": "",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        "sec-ch-ua": "\"Chromium\";v=\"149\", \"Google Chrome\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        ":authority": "challenges.cloudflare.com",
+        ":method": "GET",
+        ":path": "/turnstile/v0/b/e694063b5082/api.js?onload=oNxb8&render=explicit",
+        ":scheme": "https",
+        "accept": "*/*",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "accept-language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+        "sec-fetch-dest": "script",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "cross-site"
+      }
+    },
+    {
+      "type": "REQUEST",
+      "method": "GET",
+      "url": "https://www.mailticking.com/favicon.ico",
+      "headers": {
+        "sec-ch-ua-full-version-list": "\"Chromium\";v=\"149.0.7827.103\", \"Google Chrome\";v=\"149.0.7827.103\", \"Not)A;Brand\";v=\"24.0.0.0\"",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "referer": "https://www.mailticking.com/",
+        "sec-ch-ua": "\"Chromium\";v=\"149\", \"Google Chrome\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
+        "sec-ch-ua-bitness": "\"64\"",
+        "sec-ch-ua-model": "\"\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-arch": "\"x86\"",
+        "sec-ch-ua-full-version": "\"149.0.7827.103\"",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        "sec-ch-ua-platform-version": "\"15.0.0\""
+      }
+    },
+    {
+      "type": "RESPONSE",
+      "status": 403,
+      "url": "https://www.mailticking.com/favicon.ico",
+      "headers": {
+        "accept-ch": "Sec-CH-UA-Bitness, Sec-CH-UA-Arch, Sec-CH-UA-Full-Version, Sec-CH-UA-Mobile, Sec-CH-UA-Model, Sec-CH-UA-Platform-Version, Sec-CH-UA-Full-Version-List, Sec-CH-UA-Platform, Sec-CH-UA, UA-Bitness, UA-Arch, UA-Full-Version, UA-Mobile, UA-Model, UA-Platform-Version, UA-Platform, UA",
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cf-mitigated": "challenge",
+        "cf-ray": "a330ac830847b41b-HKG",
+        "content-encoding": "zstd",
+        "content-security-policy": "default-src 'none'; script-src 'nonce-O8WFIVbog7d2EJTaiO9okS' 'unsafe-eval' https://challenges.cloudflare.com; script-src-attr 'none'; style-src 'unsafe-inline'; img-src 'self' https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; frame-src 'self' https://challenges.cloudflare.com blob:; child-src 'self' https://challenges.cloudflare.com blob:; worker-src blob:; form-action http: https:; base-uri 'self'",
+        "content-type": "text/html; charset=UTF-8",
+        "critical-ch": "Sec-CH-UA-Bitness, Sec-CH-UA-Arch, Sec-CH-UA-Full-Version, Sec-CH-UA-Mobile, Sec-CH-UA-Model, Sec-CH-UA-Platform-Version, Sec-CH-UA-Full-Version-List, Sec-CH-UA-Platform, Sec-CH-UA, UA-Bitness, UA-Arch, UA-Full-Version, UA-Mobile, UA-Model, UA-Platform-Version, UA-Platform, UA",
+        "cross-origin-embedder-policy": "require-corp",
+        "cross-origin-opener-policy": "same-origin",
+        "cross-origin-resource-policy": "same-origin",
+        "date": "Sun, 30 Aug 2026 03:22:55 GMT",
+        "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+        "origin-agent-cluster": "?1",
+        "permissions-policy": "accelerometer=(),camera=(),clipboard-read=(),clipboard-write=(),geolocation=(),gyroscope=(),hid=(),magnetometer=(),microphone=(),payment=(),publickey-credentials-get=(),screen-wake-lock=(),serial=(),sync-xhr=(),usb=(),xr-spatial-tracking=*",
+        "priority": "u=3,i",
+        "referrer-policy": "same-origin",
+        "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=AF26f45%2B6IiarDYpVj4fOeb%2FI5ygZ8EegFMVmRKGv4aNLZ6iSq23xIrEfnRsr9f%2F47DyjBspbOCXkWAQ6KJkhCpjMjc3zeRDCgXR9a9EhuUlSMt0PW5oskE2iORTGc0ruJhqqPC6\"}]}",
+        "server": "cloudflare",
+        "server-timing": "chlray;desc=\"a330ac830847b41b\", cfExtPri",
+        "speculation-rules": "\"/cdn-cgi/speculation\"",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "SAMEORIGIN"
+      },
+      "body": "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"><meta http-equiv=\"X-UA-Compatible\" content=\"IE=Edge\"><meta name=\"robots\" content=\"noindex,nofollow\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"content-security-policy\" content=\"default-src &#39;none&#39;; script-src &#39;nonce-O8WFIVbog7d2EJTaiO9okS&#39; &#39;unsafe-eval&#39; https://challenges.cloudflare.com; script-src-attr &#39;none&#39;; style-src &#39;unsafe-inline&#39;; img-src &#39;self&#39; https://challenges.cloudflare.com; connect-src &#39;self&#39; https://challenges.cloudflare.com; frame-src &#39;self&#39; https://challenges.cloudflare.com blob:; child-src &#39;self&#39; https://challenges.cloudflare.com blob:; worker-src blob:; form-action http: https:; base-uri &#39;self&#39;\"><style>*{box-sizing:border-box;margin:0;padding:0}html{line-height:1.15;-webkit-text-size-adjust:100%;color:#313131;font"
+    },
+    {
+      "type": "RESPONSE",
+      "status": 200,
+      "url": "https://challenges.cloudflare.com/turnstile/v0/b/e694063b5082/api.js?onload=oNxb8&render=explicit",
+      "headers": {
+        "access-control-allow-origin": "*",
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cache-control": "max-age=31536000, stale-if-error=10800, stale-while-revalidate=31536000, public",
+        "cf-ray": "a330ac807aae8b27-HKG",
+        "content-encoding": "br",
+        "content-type": "application/javascript; charset=UTF-8",
+        "cross-origin-resource-policy": "cross-origin",
+        "date": "Sun, 30 Aug 2026 03:22:55 GMT",
+        "etag": "W/\"e694063b5082-api\"",
+        "priority": "u=3,i=?0",
+        "server": "cloudflare",
+        "server-timing": "cfExtPri",
+        "timing-allow-origin": "https://www.mailticking.com",
+        "x-content-type-options": "nosniff"
+      },
+      "body": "\"use strict\";(function(){function wn(e,t,r,n,a,u,l){try{var d=e[u](l),f=d.value}catch(p){r(p);return}d.done?t(f):Promise.resolve(f).then(n,a)}function Tn(e){return function(){var t=this,r=arguments;return new Promise(function(n,a){var u=e.apply(t,r);function l(f){wn(u,n,a,l,d,\"next\",f)}function d(f){wn(u,n,a,l,d,\"throw\",f)}l(void 0)})}}function $(e,t,r){return t in e?Object.defineProperty(e,t,{value:r,enumerable:!0,configurable:!0,writable:!0}):e[t]=r,e}function T(e,t){\"@swc/helpers - instanceof\";return t!=null&&typeof Symbol!=\"undefined\"&&t[Symbol.hasInstance]?!!t[Symbol.hasInstance](e):e instanceof t}function Ce(e){for(var t=1;t<arguments.length;t++){var r=arguments[t]!=null?arguments[t]:{},n=Object.keys(r);typeof Object.getOwnPropertySymbols==\"function\"&&(n=n.concat(Object.getOwnPropertySymbols(r).filter(function(a){return Object.getOwnPropertyDescriptor(r,a).enumerable}))),n.forEach(function(a){$(e,a,r[a])})}return e}function bi(e,t){var r=Object.keys(e);if(Object.getOwnPropertySym"
+    },
+    {
+      "type": "REQUEST",
+      "method": "GET",
+      "url": "https://www.mailticking.com/favicon.ico",
+      "headers": {
+        "sec-ch-ua-full-version-list": "\"Chromium\";v=\"149.0.7827.103\", \"Google Chrome\";v=\"149.0.7827.103\", \"Not)A;Brand\";v=\"24.0.0.0\"",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "referer": "https://www.mailticking.com/",
+        "sec-ch-ua": "\"Chromium\";v=\"149\", \"Google Chrome\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
+        "sec-ch-ua-bitness": "\"64\"",
+        "sec-ch-ua-model": "\"\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-arch": "\"x86\"",
+        "sec-ch-ua-full-version": "\"149.0.7827.103\"",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        "sec-ch-ua-platform-version": "\"15.0.0\""
+      }
+    },
+    {
+      "type": "RESPONSE",
+      "status": 403,
+      "url": "https://www.mailticking.com/favicon.ico",
+      "headers": {
+        "accept-ch": "Sec-CH-UA-Bitness, Sec-CH-UA-Arch, Sec-CH-UA-Full-Version, Sec-CH-UA-Mobile, Sec-CH-UA-Model, Sec-CH-UA-Platform-Version, Sec-CH-UA-Full-Version-List, Sec-CH-UA-Platform, Sec-CH-UA, UA-Bitness, UA-Arch, UA-Full-Version, UA-Mobile, UA-Model, UA-Platform-Version, UA-Platform, UA",
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cf-mitigated": "challenge",
+        "cf-ray": "a330ac836848b41b-HKG",
+        "content-encoding": "zstd",
+        "content-security-policy": "default-src 'none'; script-src 'nonce-BZLmKfU8inZI071dfQHNM1' 'unsafe-eval' https://challenges.cloudflare.com; script-src-attr 'none'; style-src 'unsafe-inline'; img-src 'self' https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; frame-src 'self' https://challenges.cloudflare.com blob:; child-src 'self' https://challenges.cloudflare.com blob:; worker-src blob:; form-action http: https:; base-uri 'self'",
+        "content-type": "text/html; charset=UTF-8",
+        "critical-ch": "Sec-CH-UA-Bitness, Sec-CH-UA-Arch, Sec-CH-UA-Full-Version, Sec-CH-UA-Mobile, Sec-CH-UA-Model, Sec-CH-UA-Platform-Version, Sec-CH-UA-Full-Version-List, Sec-CH-UA-Platform, Sec-CH-UA, UA-Bitness, UA-Arch, UA-Full-Version, UA-Mobile, UA-Model, UA-Platform-Version, UA-Platform, UA",
+        "cross-origin-embedder-policy": "require-corp",
+        "cross-origin-opener-policy": "same-origin",
+        "cross-origin-resource-policy": "same-origin",
+        "date": "Sun, 30 Aug 2026 03:22:55 GMT",
+        "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+        "origin-agent-cluster": "?1",
+        "permissions-policy": "accelerometer=(),camera=(),clipboard-read=(),clipboard-write=(),geolocation=(),gyroscope=(),hid=(),magnetometer=(),microphone=(),payment=(),publickey-credentials-get=(),screen-wake-lock=(),serial=(),sync-xhr=(),usb=(),xr-spatial-tracking=*",
+        "priority": "u=1,i",
+        "referrer-policy": "same-origin",
+        "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=5nKLRR6pVrEiESzxzJa5Q6XBgIHaDUNHaHnXDQ2agRroOs3wBXqqp1SmcvCSY8NPj8W%2Bx%2BvhKvVYOQf7T%2FDAlP2GPtmEqPECXxKwxvXeMJkH4wuljp2qjYgEk3IOw7ZcgaTuT%2Boo\"}]}",
+        "server": "cloudflare",
+        "server-timing": "chlray;desc=\"a330ac836848b41b\", cfExtPri",
+        "speculation-rules": "\"/cdn-cgi/speculation\"",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "SAMEORIGIN"
+      },
+      "body": "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"><meta http-equiv=\"X-UA-Compatible\" content=\"IE=Edge\"><meta name=\"robots\" content=\"noindex,nofollow\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"content-security-policy\" content=\"default-src &#39;none&#39;; script-src &#39;nonce-BZLmKfU8inZI071dfQHNM1&#39; &#39;unsafe-eval&#39; https://challenges.cloudflare.com; script-src-attr &#39;none&#39;; style-src &#39;unsafe-inline&#39;; img-src &#39;self&#39; https://challenges.cloudflare.com; connect-src &#39;self&#39; https://challenges.cloudflare.com; frame-src &#39;self&#39; https://challenges.cloudflare.com blob:; child-src &#39;self&#39; https://challenges.cloudflare.com blob:; worker-src blob:; form-action http: https:; base-uri &#39;self&#39;\"><style>*{box-sizing:border-box;margin:0;padding:0}html{line-height:1.15;-webkit-text-size-adjust:100%;color:#313131;font"
+    },
+    {
+      "type": "REQUEST",
+      "method": "POST",
+      "url": "https://www.mailticking.com/cdn-cgi/challenge-platform/h/b/fo/2065786624:1788055806:NeMonMorkXueeUKvLYYE_zW9r7qYk_CctkMBX9xADOo/a330ac7ea83cb41b/M3_JljEn9SUeLPoTSYDv9yakII2E3KZ.b4.mspthEo8-1788060175-1.2.1.1-nM29wLHNKer1ANsPwoqGhyM5k3x5UsLiWSKIcC3uUMaSzPH_RkjTEsOPRb75AXC0",
+      "headers": {
+        "sec-ch-ua-full-version-list": "\"Chromium\";v=\"149.0.7827.103\", \"Google Chrome\";v=\"149.0.7827.103\", \"Not)A;Brand\";v=\"24.0.0.0\"",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "referer": "https://www.mailticking.com/",
+        "sec-ch-ua": "\"Chromium\";v=\"149\", \"Google Chrome\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
+        "sec-ch-ua-bitness": "\"64\"",
+        "cf-chl-ra": "0",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-model": "\"\"",
+        "sec-ch-ua-arch": "\"x86\"",
+        "sec-ch-ua-full-version": "\"149.0.7827.103\"",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        "content-type": "text/plain;charset=UTF-8",
+        "cf-chl": "M3_JljEn9SUeLPoTSYDv9yakII2E3KZ.b4.mspthEo8-1788060175-1.2.1.1-nM29wLHNKer1ANsPwoqGhyM5k3x5UsLiWSKIcC3uUMaSzPH_RkjTEsOPRb75AXC0",
+        "sec-ch-ua-platform-version": "\"15.0.0\""
+      },
+      "postData": "$UDZYN$wzDFy50NV5EXhRCwv51L6r4D7eNC3OxMRQl5mjo7KxeoMqwIUXEs0uufNGtfh$qPvRWOGIixIzthP$EKpk+DZQpOnOUk3Wxi+r5JW48i6maCECtwPSgJ9OqYTjoyznNb$8aqI2ZZJ41B$kKurUB5z6$4MyXZ2aLo6I1+tcDbCCbEX6KokB8kuvfacNRzqDyI+Qqjqi4T0FFja1AVpOJw8FogYOqzgNUtU2QEZQTXl131OM-dioWnySXSTPCQ4ussrC15h8g3B006mj-3PyOqWlK6cFFfXA4JPzN5LxpEoqd5ZBdv7lM3JFhuEXDW7ye9CgfFe0gwZzmc3wqC7UcaC02Od$LlViAlGLJU8ijeJD-p+WLCMtgy0xLIQMaLrgfTxf36P77KhyEqEVYDjosMag6-GLAo44dKZprvwSPA9CzTT-9BlgzNEu6uSTCVAZ2ZXFT0E7k-zly5K-d3AKXudfGMGuhwLyr28vzLJKCbakW81qqaEdrVx-Ki7BZhw6vZm7JMErb3jW7YwG27OIDqW1B6+cDmFOVQla$5qwv0wJT2ktFT+jEliE$2AmtSc5mCkPLfkJy4m4iOkII1sscMV5m3VjLPccGFLUNg192+duqvdA9VXXlGtA+iEWe7yWTU8RlNqdjvDWUrGm2Vkdz9+L3KpBq5KfsxEwLOmr3NeeC9RJw8BE$vQwyjlZSinhZuNr4fWOsYMcOREdwaojYSSaYE0qd4eU$LhJ0X$NMmBOGVCRGkN2uK7MKBIWGUsTqdJcYB8tdMsXKDR$p-4zhrupxjACAXULC$$$DXMLyGFbYfw9838d5jJZzrI-gJuGIuEmBCMGQDw3hKbpM2a3ZAdMmuycwqkxeY4EP$jexAxCmKO4JvBe7zTWnwQlLn65j9xm+Uy52AFp032Ens-jpW5x6ZL0SgG868zdfhsh3zI1teSFA6ojf5ND1uGLy+09CRt9F+RE0KF15rVbyCTe1Bhogol1lcU2yTVZ0I7IfPQ6Plz+NNYx4kpE958W8wFXZ9$9gQ654RbovxGoBfrV8FSOKVrhbYBl3W-BcfKSaITuesPsBxE2nOc5oDYMBnh8Oz236Er7sSqQi7bLZol5r3bs4hLf0zpmYz7S4QpMlD2a5nAQeEGoJW8iMKmVloOQfDAD6eQP6Yp7YQrCaanqCgrc8GtOAJN$DJQEN6x3dYbJp3ZQBXlTkYCYiKGiZevK+oSvr6Qit9BRzjcOTszAhWBj8FAGs$sZ1I7UrN6lhilQyAw8Yr0Lf8EBoM9NY4BSM3BsbdPhjqy0v2kC4ceWOhXEg7EIq$vjhzCNYc+UuKuJE0l8ZhiRnWApeXdK6TPlsrAYNP1vNaefhuFLCykvK+fZ5RGYQtgyhQd-yri0q$ACjNitTBCBrGYZNldARaokxUU29$tz$K4h+kZsd$iiaXgudjQzxXQP2EYBT3-iMwtra5R4ukmi+bJXP9G2xm-V-UR0fIqF2$YGQXoycULPRpmBhMzB9Gp8wK6l44i5qEKIzdPOGCOZ5VXVDUgA5xflOKvk3ZSXY8z0wkQYYL59Yz7v3P7glDXunkdfiXVNco6gbZ4q09OtCcG0wT2ewomUVDiZK$Qkq+dfN8c2Am1ZsVWboYxeG2PpiZU5tJOKGYDxoENQ1QGTbNo9tpY3UXVKtlVFEr5urdhjDd5X5Di4lJXqUzLidc+X6QMqDDC00561$$+Nexe8mY4MfS+SC0dJC-+cDziQ+4w3vLiluKZxyNRPCvtvfkMG5KG21kcQwkkUYmyDocxZ5sl$Y2aTYleXORaIK+Ch2iTVWpKtYOwE4$R1xMgZ4YY1b8AgZxifX7uu5+8KWGeAv14qhXAK7usMIysp4Ycg2XL2G8qzAnraAIBRzYKSZJrstYDJeIuKqix9OgbDeyzm+wcmmgT6-d5lMsGFp6BSGFf1sAvEKO3F8mbdTWLZfexIag9RmiIg8Lz4gwcMJZMY-BNKfbEgE3yvYTzKNpG-ssDvhypiLBq$$eKdg$cLD1MRepd5byquu9fKlAwp6kBDY54vvliz7JW4LmiWmTA7TTyfFEyaelRMwKRbxDpdid0SCeX7std01xU$t4IGgLDKjDEkIWyIG1SnBRIE6EzJk1ddyzzJk4lFwRacF7NDJQ5GNEbq6yl1TmdJm$Lgc3N$uy3UlUROPUOINZ-OnpySrjvjgkLKzKDFGSeRrfen+keJ-qKgkBlXw+dazlMha7Tqui2vAWvLsj44AC-ij5R8p+Q1aETKaCTWWbr$upvZnc+dyzL2Q9d"
+    },
+    {
+      "type": "REQUEST",
+      "method": "GET",
+      "url": "blob:https://www.mailticking.com/bf125d85-f83c-45fe-acbf-c29a266c3a90",
+      "headers": {
+        "accept": "*/*"
+      }
+    },
+    {
+      "type": "RESPONSE",
+      "status": 200,
+      "url": "https://www.mailticking.com/cdn-cgi/challenge-platform/h/b/fo/2065786624:1788055806:NeMonMorkXueeUKvLYYE_zW9r7qYk_CctkMBX9xADOo/a330ac7ea83cb41b/M3_JljEn9SUeLPoTSYDv9yakII2E3KZ.b4.mspthEo8-1788060175-1.2.1.1-nM29wLHNKer1ANsPwoqGhyM5k3x5UsLiWSKIcC3uUMaSzPH_RkjTEsOPRb75AXC0",
+      "headers": {
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cf-chl-gen": "sZ9nXEQiYA6YFqkR+6VQiyn9T9MZiPkg/ZYcFgYzEaU=$1IWWtdj3bZSb99w1mDP3eQ==",
+        "cf-ray": "a330ac83d84db41b-HKG",
+        "content-encoding": "zstd",
+        "content-type": "text/plain; charset=UTF-8",
+        "date": "Sun, 30 Aug 2026 03:22:55 GMT",
+        "priority": "u=1,i",
+        "server": "cloudflare",
+        "server-timing": "cfExtPri",
+        "timing-allow-origin": "https://www.mailticking.com"
+      },
+      "body": "uaWcspOLv7aUnr+4np2ihpt+wsmKzM6RnsDK0pXW1ozPxLSXtLy6qrrAvq686b62wLas5+67xuPr7a7q7bWy99nW/Lf8wNsABcPuAuDTxfsEB/rhEdDHFPHuDc8V1hIaFgb3HvjrIRQcHSYnJhPj3AoI9ucuBRry7PIq7fUFEjEc+Tcn+Dsy+fkb9zg+RDM1NE1FNycoMh8kSSxOUkFCUlUvWlMaWTRUYVFRMTxbSlhLWD9eOl06MGdyd2s4b3pTbXN6UXBRblFcVmJiWYNKRGRKjEdPh4ZzjZKDZXNQTI52h392e15/dJ6lZHp7oqqdq3h8pYNvf35/jIqWgXWUqLm2eZSxrIKgvn2vk4KChYm9pberh8imw42/xdOtlLuyt4+esN/TorqinNrovL3k5+m/yOTNvdrzvOGs8Lbux+z5uNjx7trC19+3wbn34ef46Qfj7RDmAAET1dEIzs/lDfvdGBoK9tj12/Ph2RgCABkLAQQOMAcgITP0FygBJwYtHP1AOCoX+BD7JAL5OiIDOSo3JC5QJxNQKxEOJhEvLhZZUSxOYDtPWGYlIjxpRkxDSGRuQW1SPV9kQDdQV1V2ZzxmUFJbfXFDdHt/UHZ/hkl5YFtjeYaLUWuGeIN5Z1eFe5GOf3l+dZydl5iSZZmhmnydqZh/eoKHh6awdaWuo6ezj3yptbmzo32Us6CzuL2XjI6LscnDzcemja/N0au1uNetvcnRoN3V5eTdu9e/ucvD4Lft2sG+yszWyrDYsuO42vjW77rN4ga70vEH5QEA2ffL4PEKBA4I5s3vDvXl6+3m1PUXAvQa4vYBE/T64vMt9wctMioR/S0MNxQuC/I7Fxk/NjENNEAbEiQIKUYoNRgID1E+UxMdUS1NDywxSzBQJhpAG1xcRBdXZV9WR1RfV2wvJlxbZHBKP3JTUzVKUTVmVjo+g0NTb2BoYlmCikNnXX2ObWFcaGqKT1CBj5aNiVaJlX9bnnajYIORmYmd"
+    },
+    {
+      "type": "RESPONSE",
+      "status": 200,
+      "url": "blob:https://www.mailticking.com/bf125d85-f83c-45fe-acbf-c29a266c3a90",
+      "headers": {
+        "content-type": "text/javascript",
+        "content-length": "291"
+      },
+      "body": "var _p=null;if(self.trustedTypes)try{_p=self.trustedTypes.createPolicy('Kssz2',{createScript:function(s){return s;}})}catch(e){self.postMessage({type:'tt-policy-error',msg:e.message})}onmessage=function(e){e.isTrusted&&''===e.origin&&null===e.source&&eval(_p?_p.createScript(e.data):e.data)}"
+    }
+  ]
+}

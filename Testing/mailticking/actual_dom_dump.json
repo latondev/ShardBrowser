@@ -1,0 +1,27 @@
+{
+  "inputs": [
+    {
+      "id": "cf-chl-widget-cf02z_response",
+      "class": "",
+      "value": "",
+      "placeholder": "",
+      "outer": "<input type=\"hidden\" name=\"cf-turnstile-response\" id=\"cf-chl-widget-cf02z_response\">"
+    }
+  ],
+  "buttons": [
+    {
+      "text": "Cloudflare",
+      "id": "",
+      "class": "",
+      "outer": "<a rel=\"noopener noreferrer\" href=\"https://www.cloudflare.com?utm_source=challenge&amp;utm_campaign=l\" target=\"_blank\" aria-label=\"Cloudflare, mở trong thẻ mới\">Cloudflare</a>"
+    },
+    {
+      "text": "Quyền riêng tư",
+      "id": "",
+      "class": "footer-text",
+      "outer": "<a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://www.cloudflare.com/privacypolicy/\" aria-label=\"Quyền riêng tư, mở trong thẻ mới\" class=\"footer-text\">Quyền riêng tư</a>"
+    }
+  ],
+  "tables": [],
+  "bodyText": "www.mailticking.com\nThực hiện xác minh bảo mật\n\nTrang web này sử dụng dịch vụ bảo mật để chống bot độc hại. Trang này hiển thị trong khi trang web xác minh bạn không phải là bot.\n\nRay ID: a346182e7f6f86e2\nHiệu suất và Tính bảo mật của Cloudflare\nQuyền riêng tư"
+}

@@ -628,6 +628,8 @@ async fn list_proxies() -> ApiResult {
                 "host": p.host,
                 "port": p.port,
                 "country": p.country,
+                "folder": p.folder,
+                "notes": p.notes,
             })
         })
         .collect();

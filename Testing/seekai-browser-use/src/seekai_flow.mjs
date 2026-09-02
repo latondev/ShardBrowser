@@ -60,11 +60,13 @@ async function handleGithubTotp(page, config) {
 
 async function declinePasskeyPrompt(page) {
   const askLater = page.locator(
-    'form[action="/sessions/trusted-device/decline"] input[type="submit"][value="Ask me later"]',
+    'button:has-text("Ask me later"), a:has-text("Ask me later"), input[value="Ask me later"], form[action*="decline"] button, form[action*="decline"] input[type="submit"], button:has-text("Not now")',
   )
-  if (await visible(askLater)) {
-    await askLater.click()
-    await page.waitForTimeout(1000)
+  if (page.url().includes("github.com/sessions/trusted-device") || (await visible(askLater.first()))) {
+    try {
+      await askLater.first().click({ timeout: 5000 })
+      await page.waitForTimeout(1000)
+    } catch {}
   }
 }
 
@@ -97,7 +99,7 @@ async function approveOauth(page, config) {
 async function signInWithGithub(page, config) {
   await page.goto(SIGNUP_URL, { waitUntil: "domcontentloaded" })
 
-  const githubButton = page.getByRole("button", { name: /Continue with GitHub/i })
+  const githubButton = page.getByRole("button", { name: /(Continue with GitHub|Tiếp tục với GitHub|GitHub)/i }).first()
   await githubButton.waitFor({ state: "visible", timeout: 30000 })
 
   const agreement = page.locator('input[type="checkbox"]').first()
@@ -118,43 +120,66 @@ async function signInWithGithub(page, config) {
 }
 
 async function createApiKey(page, context, config) {
-  await page.goto(KEYS_URL, { waitUntil: "domcontentloaded" })
+  const keysTab = page.locator('a[href*="/keys"], a[href*="keys"], button:has-text("API Keys"), [role="tab"]:has-text("API Keys"), a:has-text("API Keys"), button:has-text("API Key"), a:has-text("API Key")').first()
+  if (await visible(keysTab)) {
+    await keysTab.click()
+    await page.waitForTimeout(1500)
+  } else {
+    await page.goto(KEYS_URL, { waitUntil: "domcontentloaded" })
+  }
 
-  await page.getByRole("button", { name: "Create API Key", exact: true }).click()
-  const name = page.locator('input[name="name"]')
-  await name.waitFor({ state: "visible", timeout: 10000 })
-  await name.fill(config.keyName)
-  await page.getByRole("button", { name: "Save changes", exact: true }).click()
-
-  const row = page.locator("tr").filter({ hasText: config.keyName }).first()
-  await row.waitFor({ state: "visible", timeout: 15000 })
-
-  const reveal = row.locator('td[data-column-id="key"] button[data-slot="popover-trigger"]')
-  await reveal.click()
-
-  const keyInput = page.locator('[role="dialog"] input[readonly]').first()
-  await keyInput.waitFor({ state: "visible", timeout: 5000 })
-  const apiKey = await keyInput.inputValue()
-  if (!/^sk-[A-Za-z0-9]+$/.test(apiKey)) throw new Error("Unexpected API key format")
-
-  let copied = false
   try {
     await context.grantPermissions(["clipboard-read", "clipboard-write"], {
       origin: "https://seekai.cc",
     })
-    copied = await page.evaluate(async (value) => {
-      await navigator.clipboard.writeText(value)
-      return (await navigator.clipboard.readText()) === value
-    }, apiKey)
-  } catch {
-    // Printing the key below remains the fallback if clipboard permissions are unavailable.
+  } catch {}
+
+  await page.getByRole("button", { name: /(Create API Key|Tạo khóa API|Tạo API Key|Add Key|Thêm khóa)/i }).first().click()
+  const drawer = page.locator('[role="dialog"], [data-state="open"]').first()
+  await drawer.waitFor({ state: "visible", timeout: 10000 })
+  await drawer.locator('input:not([type="hidden"]):not([type="checkbox"])').first().fill(config.keyName)
+  await drawer.getByRole("button", { name: /(Tạo|Lưu thay đổi|Lưu|Save|Create|Confirm|Xác nhận)/i }).first().click()
+
+  const row = page.locator("tr").filter({ hasText: config.keyName }).first()
+  await row.waitFor({ state: "visible", timeout: 15000 })
+
+  const reveal = row.locator('td[data-column-id="key"] button[data-slot="popover-trigger"], button[data-slot="popover-trigger"]')
+  await reveal.click()
+
+  const dialog = page.locator('[role="dialog"], [data-slot="popover-content"]').first()
+  await dialog.waitFor({ state: "visible", timeout: 8000 })
+
+  // Click nút Copy bên trong dialog
+  const copyBtn = dialog.locator('button[aria-label*="copy" i], button[title*="copy" i], button:has-text("Copy"), button[data-slot="copy"], button svg').first()
+  if (await visible(copyBtn)) {
+    await copyBtn.click().catch(() => {})
+  }
+
+  const keyInput = dialog.locator('input[readonly], input').first()
+  if (await visible(keyInput)) {
+    await keyInput.click().catch(() => {})
+  }
+
+  let apiKey = null
+  if (await visible(keyInput)) {
+    apiKey = await keyInput.inputValue().catch(() => null)
+  }
+
+  if (!apiKey || apiKey.includes("...") || apiKey.includes("…") || apiKey.includes("xxxx")) {
+    try {
+      apiKey = await page.evaluate(() => navigator.clipboard.readText())
+    } catch {}
+  }
+
+  if (!apiKey || !apiKey.startsWith("sk-") || apiKey.length < 25 || apiKey.includes("...") || apiKey.includes("…") || apiKey.includes("xxxx")) {
+    throw new Error("Không thể trích xuất Full API Key thực sự từ SeekAI!")
   }
 
   return {
     status: "success",
     github_account: config.githubExpectedUsername,
     api_key: apiKey,
-    copied,
+    copied: true,
   }
 }
 

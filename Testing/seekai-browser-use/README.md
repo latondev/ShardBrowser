@@ -1,10 +1,9 @@
 # SeekAI + Browser Use JavaScript test
 
-## Hai lựa chọn
-
-- `npm start`: chạy script Node.js trên máy của bạn, dùng `browser-use-sdk` để tạo Browser Use Cloud browser rồi điều khiển nó bằng Playwright qua CDP.
-- `npm run start:local`: chạy Chrome local bằng Playwright. Cách này không cần Browser Use API key.
-- `npm run test:seekai`: chạy Playwright Test đầy đủ toàn bộ flow đăng nhập, 2FA, OAuth và tạo API key.
+- `npm run start:shard`: Chạy 1 tài khoản với **ShardBrowser Sandbox** (mỗi tài khoản tự động sinh 1 bộ Fingerprint độc bản, không phát hiện bot).
+- `npm run batch`: Chạy hàng loạt tài khoản từ `accounts.txt` với ShardBrowser Sandbox, tự động dọn dẹp profile và lưu kết quả vào `output.txt` theo định dạng `username|pass|apikey`.
+- `npm run start:local`: Chạy Chrome local bằng Playwright thông thường.
+- `npm start`: Chạy qua Browser Use Cloud SDK.
 
 Open-source Browser Use agent hiện chủ yếu có API Python. Với JavaScript, cách được tài liệu Browser Use hỗ trợ là `browser-use-sdk` hoặc điều khiển browser qua Playwright/Puppeteer.
 

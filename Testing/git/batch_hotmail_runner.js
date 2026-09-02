@@ -33,16 +33,18 @@ export class BatchHotmailRunner {
   _filePath = "";
   _cooldownSeconds = 15;
   _proxyMode = "rotate"; // "direct" | "shard" | "rotate"
+  _proxyGroup = "vn";
   _accounts = [];
   _successCount = 0;
   _failedCount = 0;
   _currentRunner = null;
   _isStopping = false;
 
-  constructor(filePath = "", cooldownSeconds = 15, proxyMode = "rotate") {
+  constructor(filePath = "", cooldownSeconds = 15, proxyMode = "rotate", proxyGroup = "vn") {
     this._filePath = filePath || path.join(process.cwd(), "Testing", "git", "hotmail", "Hotmail_2.txt");
     this._cooldownSeconds = Number(cooldownSeconds) || 15;
     this._proxyMode = proxyMode || "rotate";
+    this._proxyGroup = proxyGroup || "vn";
 
     // Lắng nghe tín hiệu dừng an toàn (Ctrl + C)
     process.on("SIGINT", async () => {
@@ -107,7 +109,7 @@ export class BatchHotmailRunner {
     console.log("==================================================================");
     console.log(`🚀 KHỞI ĐỘNG BATCH HOTMAIL RUNNER (MICROSOFT GRAPH API OAUTH2)`);
     console.log(`📁 File nguồn : ${this._filePath} (${lines.length} tài khoản)`);
-    console.log(`🌐 Chế độ IP  : [${this._proxyMode.toUpperCase()}] ${this._proxyMode === 'direct' ? '(IP Direct máy thật)' : (this._proxyMode === 'shard' ? '(Proxy có sẵn trong Shard)' : '(Proxy xoay proxyxoay.shop)')}`);
+    console.log(`🌐 Chế độ IP  : [${this._proxyMode.toUpperCase()}] ${this._proxyMode === 'direct' ? '(IP Direct máy thật)' : (this._proxyMode === 'shard' ? `(Proxy nhóm [${this._proxyGroup.toUpperCase()}] trong Shard)` : '(Proxy xoay proxyxoay.shop)')}`);
     console.log(`⏱️ Nghỉ giữa  : ${this._cooldownSeconds}s mỗi tài khoản`);
     console.log("==================================================================\n");
 
@@ -123,10 +125,11 @@ export class BatchHotmailRunner {
       console.log(`   [TIẾN ĐỘ: ${accIndex}/${lines.length}] -> ĐĂNG KÝ GITHUB CHO: ${targetEmail}`);
       console.log(`<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<`);
 
-      // Khởi tạo Runner với Hotmail Client & Proxy Mode
+      // Khởi tạo Runner với Hotmail Client & Proxy Mode & Proxy Group
       const runner = new AiAgentRunner({
         hotmailClient: hotmailClient,
         proxyMode: this._proxyMode,
+        proxyGroup: this._proxyGroup,
       });
       this._currentRunner = runner;
 
@@ -134,6 +137,7 @@ export class BatchHotmailRunner {
         const result = await runner.runFullE2EWorkflow({
           saveSecrets: true,
           proxyMode: this._proxyMode,
+          proxyGroup: this._proxyGroup,
         });
 
         this._successCount++;
@@ -172,6 +176,7 @@ function parseCommandLineArgs() {
   let filePath = path.join(process.cwd(), "Testing", "git", "hotmail", "Hotmail_2.txt");
   let cooldownSec = 15;
   let proxyMode = "rotate";
+  let proxyGroup = "vn";
 
   for (const arg of args) {
     if (arg.startsWith("--file=")) {
@@ -180,6 +185,8 @@ function parseCommandLineArgs() {
       cooldownSec = parseInt(arg.replace(/^--cooldown=/, ""), 10) || 15;
     } else if (arg.startsWith("--proxy=")) {
       proxyMode = arg.replace(/^--proxy=/, "").toLowerCase().trim();
+    } else if (arg.startsWith("--group=") || arg.startsWith("--proxy-group=")) {
+      proxyGroup = arg.replace(/^--(group|proxy-group)=/, "").toLowerCase().trim();
     } else if (arg === "--direct" || arg === "-d") {
       proxyMode = "direct";
     } else if (arg === "--shard" || arg === "-s") {
@@ -195,13 +202,13 @@ function parseCommandLineArgs() {
     }
   }
 
-  return { filePath, cooldownSec, proxyMode };
+  return { filePath, cooldownSec, proxyMode, proxyGroup };
 }
 
 // CLI Entrypoint
 async function main() {
-  const { filePath, cooldownSec, proxyMode } = parseCommandLineArgs();
-  const batch = new BatchHotmailRunner(filePath, cooldownSec, proxyMode);
+  const { filePath, cooldownSec, proxyMode, proxyGroup } = parseCommandLineArgs();
+  const batch = new BatchHotmailRunner(filePath, cooldownSec, proxyMode, proxyGroup);
   await batch.run();
 }
 
