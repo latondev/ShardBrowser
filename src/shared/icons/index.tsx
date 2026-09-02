@@ -57,6 +57,24 @@ export const NavFingerprintsIcon = make(FingerPrintIcon);
 export const NavSettingsIcon = make(Settings01Icon);
 export const DocsIcon = make(BookOpen01Icon);
 
+export function NavExtensionsIcon(props: ComponentProps<"svg">) {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a1.5 1.5 0 0 0-3 0V5H6a2 2 0 0 0-2 2v3.8H5.5a1.5 1.5 0 0 1 0 3H4V18a2 2 0 0 0 2 2h4v-1.5a1.5 1.5 0 0 1 3 0V20h4a2 2 0 0 0 2-2v-4h1.5a1.5 1.5 0 0 0 0-3z" />
+    </svg>
+  );
+}
+
 /* ── OS logos ── */
 export const AppleOsIcon = make(AppleIcon);
 export const WindowsOsIcon = make(WindowsNewIcon);

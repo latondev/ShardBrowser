@@ -40,6 +40,9 @@ export const defaultForm = (): ProfileForm => ({
   media_audio_in: 1,
   media_audio_out: 1,
   media_video_in: 1,
+
+  extension_mode: "all",
+  extensions: [],
 });
 
 export function fromStored(stored: any): ProfileForm {
@@ -83,6 +86,9 @@ export function fromStored(stored: any): ProfileForm {
   f.media_audio_out = md.audio_output_count ?? 1;
   f.media_video_in = md.video_input_count ?? 1;
 
+  f.extension_mode = stored?.extension_mode ?? "all";
+  f.extensions = Array.isArray(stored?.extensions) ? stored.extensions : [];
+
   return f;
 }
 
@@ -102,6 +108,8 @@ export function toStored(f: ProfileForm, lib: FingerprintEntry | null): any {
   base.timezone = f.timezone;
   base.icu_locale = f.language === AUTO_LANG ? null : f.language;
   base.webrtc = f.webrtc;
+  base.extension_mode = f.extension_mode ?? "all";
+  base.extensions = f.extensions ?? [];
 
   base.navigator = {
     ...(base.navigator || {}),

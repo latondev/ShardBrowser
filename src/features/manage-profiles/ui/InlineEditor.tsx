@@ -14,6 +14,8 @@ import {
 import type { ProfileForm, GeoMode, WebRtcMode } from "../../../entities/profile";
 import type { FingerprintEntry } from "../../../entities/fingerprint";
 import type { ProxyEntry } from "../../../entities/proxy";
+import type { ExtensionInfo } from "../../../entities/extension";
+import { extensionList } from "../../../entities/extension";
 import { enrichPicksForPreset } from "../../../entities/profile";
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
@@ -36,6 +38,11 @@ export function InlineEditor({
 }) {
   const f = draft;
   const u = <K extends keyof ProfileForm>(k: K, v: ProfileForm[K]) => setDraft({ ...f, [k]: v });
+  const [extList, setExtList] = useState<ExtensionInfo[]>([]);
+
+  useEffect(() => {
+    extensionList().then(setExtList).catch(() => {});
+  }, []);
 
   // OS filter init from bound fingerprint's platform; new profile uses host OS.
   const currentFp = fingerprints.find((x) => x.id === f.gpu_preset_id);
@@ -256,6 +263,62 @@ export function InlineEditor({
             <SelectField label="Mic in" value={f.media_audio_in} onChange={(v) => u("media_audio_in", v)} options={MEDIA_COUNT_OPTIONS} />
             <SelectField label="Speakers" value={f.media_audio_out} onChange={(v) => u("media_audio_out", v)} options={MEDIA_COUNT_OPTIONS} />
             <SelectField label="Webcam" value={f.media_video_in} onChange={(v) => u("media_video_in", v)} options={MEDIA_COUNT_OPTIONS} />
+          </div>
+
+          <div className="mt-2.5">
+            <SectionHeading>Developer Extensions</SectionHeading>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <SegmentControl
+              size="small"
+              className="w-full *:flex-1"
+              value={f.extension_mode ?? "all"}
+              items={[
+                { value: "all", label: "All active" },
+                { value: "custom", label: "Custom select" },
+                { value: "none", label: "Disabled" },
+              ]}
+              onChange={(v) => u("extension_mode", v as "all" | "custom" | "none")}
+            />
+            {f.extension_mode === "custom" && (
+              <div className="mt-1 flex max-h-36 flex-col gap-1.5 overflow-y-auto rounded-lg border border-stroke-soft-200 bg-bg-white-0 p-2 text-paragraph-xs">
+                {extList.length === 0 ? (
+                  <span className="text-text-soft-400">No extensions in Library.</span>
+                ) : (
+                  extList.map((ext) => {
+                    const selected = f.extensions?.includes(ext.id);
+                    return (
+                      <label key={ext.id} className="flex items-center gap-2 cursor-pointer hover:bg-bg-weak-50 p-1 rounded">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={(e) => {
+                            const cur = f.extensions || [];
+                            const next = e.target.checked
+                              ? [...cur, ext.id]
+                              : cur.filter((id) => id !== ext.id);
+                            u("extensions", next);
+                          }}
+                          className="size-3.5 accent-primary-base rounded"
+                        />
+                        <span className="truncate text-text-strong-950 font-medium">{ext.name}</span>
+                        <span className="text-[10px] text-text-soft-400">v{ext.version}</span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            )}
+            {f.extension_mode === "all" && (
+              <span className="text-[11px] text-text-soft-400">
+                Auto-loads all {extList.filter((e) => e.enabled).length} active extension(s) from Library.
+              </span>
+            )}
+            {f.extension_mode === "none" && (
+              <span className="text-[11px] text-text-soft-400">
+                No extensions will be loaded for this profile.
+              </span>
+            )}
           </div>
 
           <Textarea

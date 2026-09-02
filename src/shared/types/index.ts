@@ -1,5 +1,16 @@
-export type Theme = "dark" | "light";
-export type Section = "browsers" | "proxies" | "proxyshard" | "fingerprints" | "settings";
+export type Section = "browsers" | "proxies" | "proxyshard" | "fingerprints" | "extensions" | "settings";
+
+export type ExtensionInfo = {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  path: string;
+  icon_base64?: string | null;
+  enabled: boolean;
+  permissions?: string[];
+  inspect_views?: string[];
+};
 
 export type ToastItem = { id: number; kind: "ok" | "err" | "info"; text: string };
 

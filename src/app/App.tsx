@@ -8,6 +8,7 @@ import { BrowsersPage } from "../pages/browsers";
 import { ProxiesPage } from "../pages/proxies";
 import { ProxyShardPage } from "../pages/proxyshard";
 import { FingerprintsPage } from "../pages/fingerprints";
+import { ExtensionsPage } from "../pages/extensions";
 import { SettingsPage } from "../pages/settings";
 import { useNav } from "../shared/model/navigation";
 
@@ -28,6 +29,7 @@ export function App() {
             {section === "proxies" && <ProxiesPage />}
             {section === "proxyshard" && <ProxyShardPage />}
             {section === "fingerprints" && <FingerprintsPage />}
+            {section === "extensions" && <ExtensionsPage />}
             {section === "settings" && <SettingsPage />}
           </main>
           <ToastHost />

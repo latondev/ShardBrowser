@@ -54,4 +54,7 @@ export type ProfileForm = {
   media_audio_in: number;
   media_audio_out: number;
   media_video_in: number;
+
+  extension_mode: "all" | "custom" | "none";
+  extensions: string[];
 };

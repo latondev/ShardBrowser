@@ -8,6 +8,7 @@ import {
   RouteIcon,
   NavShopIcon,
   NavFingerprintsIcon,
+  NavExtensionsIcon,
   NavSettingsIcon,
   CopyIcon,
   DocsIcon,
@@ -82,7 +83,10 @@ export function Sidebar() {
     },
     {
       label: "Library",
-      items: [{ id: "fingerprints", label: "Fingerprints", svg: <NavFingerprintsIcon className="size-[18px]" /> }],
+      items: [
+        { id: "fingerprints", label: "Fingerprints", svg: <NavFingerprintsIcon className="size-[18px]" /> },
+        { id: "extensions", label: "Extensions", svg: <NavExtensionsIcon className="size-[18px]" /> },
+      ],
     },
     {
       label: "System",
