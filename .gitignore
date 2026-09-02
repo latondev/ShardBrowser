@@ -1,21 +1,23 @@
+# ===== Node / Build =====
+node_modules/
+dist/
+dist-ssr/
+ui-kit/dist/
+ui-kit/node_modules/
+*.local
+*.tsbuildinfo
+.cache/
+.parcel-cache/
+coverage/
+
 # ===== Logs =====
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-
-# ===== Node / Vite =====
-node_modules
-dist
-dist-ssr
-*.local
-*.tsbuildinfo
-.cache/
-.parcel-cache/
-coverage/
 
 # ===== Python build / cache =====
 __pycache__/
@@ -53,5 +55,5 @@ Thumbs.db
 !.env.example
 github-2fa-secrets.txt
 
-# ===== MCP server local install (downloaded by the user post-install) =====
+# ===== MCP server local install =====
 mcp/node_modules/
