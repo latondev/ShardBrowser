@@ -10,7 +10,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "check2fa": "node Testing/Check2faGit/run_batch_2fa.js"
+    "check2fa": "node Testing/Check2faGit/run_batch_2fa.js",
+    "gen:fingerprints": "node FingerprintGen/generate_8k_fingerprints.mjs"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.3.0",
