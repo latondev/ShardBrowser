@@ -11,7 +11,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "check2fa": "node Testing/Check2faGit/run_batch_2fa.js",
-    "gen:fingerprints": "node FingerprintGen/generate_8k_fingerprints.mjs"
+    "gen:fingerprints": "node FingerprintGen/generate_8k_fingerprints.mjs",
+    "proxify:start": "cmd /c \"cd /d Testing\\proxify && start.bat\"",
+    "proxify:check": "cmd /c \"cd /d Testing\\proxify && check_proxies.bat\"",
+    "tabitoken:start": "npm --prefix Testing/tabitoken start"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.3.0",

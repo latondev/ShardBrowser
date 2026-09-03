@@ -13,7 +13,10 @@ import urllib.request
 import urllib.error
 import concurrent.futures
 import time
+import ssl
 from typing import List, Dict, Any, Optional
+
+SSL_CONTEXT = ssl.create_default_context()
 
 # Đảm bảo terminal Windows không bị lỗi Unicode
 if hasattr(sys.stdout, "reconfigure"):
@@ -151,8 +154,8 @@ def filter_proxies(
 
     return filtered
 
-def test_single_proxy(proxy_dict: Dict[str, Any], test_url: str = "http://httpbin.org/ip", timeout: int = 5) -> Dict[str, Any]:
-    """Kiểm tra độ trễ thực tế của proxy."""
+def test_single_proxy(proxy_dict: Dict[str, Any], test_url: str = "https://api.ipify.org", timeout: int = 5) -> Dict[str, Any]:
+    """Kiểm tra độ trễ và tính hợp lệ của SSL/TLS thực tế của proxy."""
     ip = proxy_dict.get("ip")
     port = proxy_dict.get("port")
     proto = proxy_dict.get("protocol", "http").lower()
@@ -161,24 +164,30 @@ def test_single_proxy(proxy_dict: Dict[str, Any], test_url: str = "http://httpbi
     start_time = time.time()
     try:
         proxy_handler = urllib.request.ProxyHandler({'http': proxy_str, 'https': proxy_str})
-        opener = urllib.request.build_opener(proxy_handler)
+        https_handler = urllib.request.HTTPSHandler(context=SSL_CONTEXT)
+        opener = urllib.request.build_opener(proxy_handler, https_handler)
         req = urllib.request.Request(test_url, headers={'User-Agent': DEFAULT_USER_AGENT})
         with opener.open(req, timeout=timeout) as resp:
-            elapsed = (time.time() - start_time) * 1000
-            proxy_dict["is_live"] = True
-            proxy_dict["real_ping_ms"] = round(elapsed, 1)
-            return proxy_dict
+            if resp.status == 200:
+                elapsed = (time.time() - start_time) * 1000
+                proxy_dict["is_live"] = True
+                proxy_dict["real_ping_ms"] = round(elapsed, 1)
+                return proxy_dict
+            else:
+                proxy_dict["is_live"] = False
+                proxy_dict["real_ping_ms"] = None
+                return proxy_dict
     except Exception:
         proxy_dict["is_live"] = False
         proxy_dict["real_ping_ms"] = None
         return proxy_dict
 
 def check_proxies_live(proxies: List[Dict[str, Any]], max_workers: int = 20, timeout: int = 5) -> List[Dict[str, Any]]:
-    """Kiểm tra đồng thời nhiều proxy bằng ThreadPool."""
+    """Kiểm tra đồng thời nhiều proxy bằng ThreadPool (HTTPS + SSL verify)."""
     live_proxies = []
-    print(f"[*] Đang test kết nối cho {len(proxies)} proxies (threads={max_workers}, timeout={timeout}s)...", file=sys.stderr)
+    print(f"[*] Đang test kết nối HTTPS & SSL cho {len(proxies)} proxies (threads={max_workers}, timeout={timeout}s)...", file=sys.stderr)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(test_single_proxy, p, "http://httpbin.org/ip", timeout): p for p in proxies}
+        futures = {executor.submit(test_single_proxy, p, "https://api.ipify.org", timeout): p for p in proxies}
         for future in concurrent.futures.as_completed(futures):
             res = future.result()
             if res.get("is_live"):

@@ -3,9 +3,12 @@
   "private": true,
   "version": "1.0.0",
   "description": "JavaScript Playwright automation for Tabi Token",
-  "main": "tabitoken_automation.js",
+  "main": "batch_runner.js",
   "scripts": {
-    "start": "node tabitoken_automation.js"
+    "start": "node batch_runner.js",
+    "batch": "node batch_runner.js",
+    "test-key": "node test_key.js",
+    "single": "node tabitoken_automation.js"
   },
   "dependencies": {
     "axios": "^1.7.9",

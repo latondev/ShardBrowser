@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { ProxyEntry, ProxyTestSnapshot } from '../model/types'
-import { proxyFullTest, proxyLastTest, proxyList, proxyDelete, proxySave, proxyBulkImport } from '../model/api';
+import { proxyFullTest, proxyLastTest, proxyList, proxyDelete, proxySave, proxyBulkImport, proxyCheckAndClean, CleanReport } from '../model/api';
 import { profileList } from '../../profile/model/api';
 import { toast } from '../../../shared/lib/toast';
 import { clip } from '../../../shared/lib/clipboard';
@@ -45,6 +45,8 @@ export type ProxyStore = {
     bulkDelete: () => Promise<void>,
     bulkExport: () => void,
     bulkImportClipboard: () => Promise<void>,
+    cleaning: boolean,
+    checkAndClean: () => Promise<CleanReport | null>,
 }
 export const useProxy = create<ProxyStore>((set, get) => ({
     status: 'idle',
@@ -198,4 +200,38 @@ export const useProxy = create<ProxyStore>((set, get) => ({
             toast.ok(`Imported ${n} prox${n === 1 ? "y" : "ies"}`);
         } catch (e) { toast.err("Import failed: " + String(e)); }
     },
+    cleaning: false,
+    checkAndClean: async () => {
+        const proxies = get().proxies;
+        if (proxies.length === 0) {
+            toast.info("Không có proxy nào trong danh sách để kiểm tra.");
+            return null;
+        }
+        if ((await confirmModal({
+            title: "Check & Clean Proxies",
+            message: `Kiểm tra HTTPS & chứng chỉ SSL của toàn bộ ${proxies.length} proxy. Các proxy bị lỗi (Tunnel Fail, Lỗi SSL, Timeout) sẽ TỰ ĐỘNG BỊ XÓA để bảo đảm trình duyệt không bị lỗi. Bạn có muốn tiếp tục?`,
+            danger: true,
+        })) !== true) {
+            return null;
+        }
+
+        set({ cleaning: true });
+        toast.info(`Đang kiểm tra HTTPS & SSL cho ${proxies.length} proxy...`);
+        try {
+            const report = await proxyCheckAndClean();
+            await get().reload();
+            if (report.removed > 0) {
+                toast.ok(`Đã lọc xong: Giữ lại ${report.kept} proxy chuẩn 100%, đã xóa ${report.removed} proxy lỗi.`);
+            } else {
+                toast.ok(`Hoàn tất: Toàn bộ ${report.kept} proxy đều đạt chuẩn HTTPS 100%!`);
+            }
+            return report;
+        } catch (e) {
+            toast.err("Lỗi kiểm tra proxy: " + String(e));
+            return null;
+        } finally {
+            set({ cleaning: false });
+        }
+    },
 }))
+

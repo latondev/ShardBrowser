@@ -1287,6 +1287,18 @@ async fn proxy_full_test(entry: proxy::ProxyEntry) -> Result<proxy::TestSnapshot
 }
 
 #[tauri::command]
+async fn proxy_test_https_ssl(entry: proxy::ProxyEntry) -> Result<u128, String> {
+    proxy::test_https_ssl(&entry, 1500).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn proxy_check_and_clean() -> Result<proxy::CleanReport, String> {
+    let report = proxy::check_and_clean(1500).await.map_err(|e| e.to_string())?;
+    crate::notify_store_changed("proxies");
+    Ok(report)
+}
+
+#[tauri::command]
 fn proxy_history(id: String) -> Result<Vec<proxy::TestSnapshot>, String> {
     proxy::history(&id).map_err(|e| e.to_string())
 }
@@ -1734,6 +1746,8 @@ pub fn run() {
             proxy_check_udp,
             proxy_geo,
             proxy_full_test,
+            proxy_test_https_ssl,
+            proxy_check_and_clean,
             proxy_history,
             proxy_last_test,
             proxy_bulk_import,

@@ -2,6 +2,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
+const net = require("node:net");
+const tls = require("node:tls");
 
 // Nạp thư viện puppeteer-core và axios
 function requireModule(name) {
@@ -162,14 +164,169 @@ async function getShardProxies(apiUrl, headers, group = null, requireAddress = f
   return proxies;
 }
 
-async function getRandomShardProxy(apiUrl, headers, group = null) {
+function checkProxyAlive(proxy, timeoutMs = 4000) {
+  return new Promise((resolve) => {
+    let host = "";
+    let port = 0;
+    let kind = "http";
+    let username = "";
+    let password = "";
+
+    if (typeof proxy === "object" && proxy !== null) {
+      host = proxy.host || "";
+      port = Number(proxy.port || 0);
+      kind = (proxy.kind || "http").toLowerCase();
+      username = proxy.username || "";
+      password = proxy.password || "";
+    } else if (typeof proxy === "string") {
+      let str = proxy.trim();
+      if (str.startsWith("socks5://")) {
+        kind = "socks5";
+        str = str.replace("socks5://", "");
+      } else if (str.startsWith("https://")) {
+        kind = "https";
+        str = str.replace("https://", "");
+      } else if (str.startsWith("http://")) {
+        kind = "http";
+        str = str.replace("http://", "");
+      }
+      const parts = str.split(":");
+      if (parts.length >= 2) {
+        host = parts[0];
+        port = Number(parts[1]);
+        username = parts[2] || "";
+        password = parts[3] || "";
+      }
+    }
+
+    if (!host || !port || isNaN(port)) return resolve(false);
+
+    const start = Date.now();
+    let isFinished = false;
+
+    const finish = (result) => {
+      if (!isFinished) {
+        isFinished = true;
+        resolve(result);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      finish(false);
+    }, timeoutMs);
+
+    const socket = net.createConnection({ host, port }, () => {
+      if (kind === "socks5") {
+        const authMethod = username ? 0x02 : 0x00;
+        socket.write(Buffer.from([0x05, 0x01, authMethod]));
+      } else {
+        let authHeader = "";
+        if (username || password) {
+          const creds = Buffer.from(`${username}:${password}`).toString("base64");
+          authHeader = `Proxy-Authorization: Basic ${creds}\r\n`;
+        }
+        // Gửi CONNECT tới tabitoken.com:443 để test cả tunnel lẫn TLS
+        socket.write(
+          `CONNECT tabitoken.com:443 HTTP/1.1\r\nHost: tabitoken.com:443\r\n${authHeader}\r\n`
+        );
+      }
+    });
+
+    socket.setTimeout(timeoutMs, () => {
+      socket.destroy();
+      finish(false);
+    });
+
+    socket.on("data", (buf) => {
+      if (kind === "socks5") {
+        clearTimeout(timer);
+        socket.destroy();
+        const latency = Date.now() - start;
+        if (buf[0] === 0x05 && (buf[1] === 0x00 || buf[1] === 0x02)) {
+          if (latency > 1500) {
+            finish({ alive: false, tooSlow: true, latency });
+          } else {
+            finish({ alive: true, latency });
+          }
+        } else {
+          finish(false);
+        }
+      } else {
+        const text = buf.toString("utf-8");
+        if (text.includes("200") || text.toLowerCase().includes("connection established")) {
+          // BƯỚC THẨM ĐỊNH SSL QUAN TRỌNG:
+          // Bắt tay TLS thực tế tới tabitoken.com với rejectUnauthorized: true.
+          // Bất kỳ proxy nào can thiệp MITM, chứng chỉ expired, self-signed sẽ bị LOẠI BỎ NGAY LẬP TỨC.
+          const tlsSocket = tls.connect({
+            socket: socket,
+            servername: "tabitoken.com",
+            rejectUnauthorized: true,
+          }, () => {
+            clearTimeout(timer);
+            const latency = Date.now() - start;
+            tlsSocket.destroy();
+            socket.destroy();
+            if (latency > 1500) {
+              finish({ alive: false, tooSlow: true, latency });
+            } else {
+              finish({ alive: true, latency });
+            }
+          });
+
+          tlsSocket.on("error", (tlsErr) => {
+            clearTimeout(timer);
+            tlsSocket.destroy();
+            socket.destroy();
+            // Bị lỗi chứng chỉ SSL / Expired -> Báo lỗi & loại bỏ
+            finish({ alive: false, sslError: tlsErr.message });
+          });
+        } else {
+          clearTimeout(timer);
+          socket.destroy();
+          finish(false);
+        }
+      }
+    });
+
+    socket.on("error", () => {
+      clearTimeout(timer);
+      socket.destroy();
+      finish(false);
+    });
+  });
+}
+
+async function getRandomShardProxy(apiUrl, headers, group = null, maxCandidates = 30) {
   let list = await getShardProxies(apiUrl, headers, group, false);
   if (!list || list.length === 0) {
     list = await getShardProxies(apiUrl, headers, null, false);
   }
   if (!list || list.length === 0) return null;
-  const idx = Math.floor(Math.random() * list.length);
-  return list[idx];
+
+  // Xáo trộn ngẫu nhiên danh sách proxy
+  const shuffled = [...list].sort(() => Math.random() - 0.5);
+  const attempts = Math.min(shuffled.length, maxCandidates);
+
+  console.log(`🌐 [Proxy Check] Đang kiểm tra để tìm 1 proxy NHANH & SỐNG (ping <= 1500ms, SSL chuẩn)...`);
+
+  for (let i = 0; i < attempts; i++) {
+    const candidate = shuffled[i];
+    const label = candidate.name || `${candidate.host}:${candidate.port}`;
+
+    const testRes = await checkProxyAlive(candidate, 2500);
+    if (testRes && testRes.alive && testRes.latency <= 1500) {
+      console.log(`   \x1b[32m[✓ NHANH & LIVE]\x1b[0m Proxy [${label}] phản hồi mượt (${testRes.latency}ms <= 1500ms) -> ĐÃ CHỌN GÁN VÀO PROFILE!`);
+      return candidate;
+    } else {
+      let reason = "Không phản hồi";
+      if (testRes?.tooSlow) reason = `Quá chậm (${testRes.latency}ms > 1500ms)`;
+      else if (testRes?.sslError) reason = `Lỗi SSL: ${testRes.sslError}`;
+      console.log(`   \x1b[31m[✗ BỎ QUA]\x1b[0m Proxy [${label}] (${reason}).`);
+    }
+  }
+
+  console.warn(`⚠️ [Proxy Check] Không tìm thấy proxy nào dưới 1500ms trong ${attempts} proxy vừa test. Tạm thời sử dụng Direct IP để tải trang siêu tốc.`);
+  return null;
 }
 
 // ==============================================================================
@@ -293,11 +450,27 @@ class ShardProfileManager {
       if (typeof proxyOption === "string" && !proxyOption.includes("://") && !proxyOption.includes(":")) {
         selectedProxyInfo = await getRandomShardProxy(this._apiUrl, this._headers, proxyOption);
       } else if (typeof proxyOption === "object" && proxyOption.id) {
-        selectedProxyInfo = proxyOption;
+        console.log(`🌐 [Proxy Check] Đang kiểm tra proxy được chỉ định [${proxyOption.name || proxyOption.host}]...`);
+        const testRes = await checkProxyAlive(proxyOption, 3500);
+        if (testRes && testRes.alive) {
+          console.log(`   \x1b[32m[✓ LIVE]\x1b[0m Proxy hoạt động tốt (${testRes.latency}ms).`);
+          selectedProxyInfo = proxyOption;
+        } else {
+          console.warn(`   \x1b[31m[✗ DIE]\x1b[0m Proxy được chỉ định bị lỗi! Chuyển sang tìm proxy ngẫu nhiên khác...`);
+          selectedProxyInfo = await getRandomShardProxy(this._apiUrl, this._headers, null);
+        }
       } else if (typeof proxyOption === "string") {
-        proxyStr = proxyOption;
+        console.log(`🌐 [Proxy Check] Đang kiểm tra proxy dạng chuỗi [${proxyOption}]...`);
+        const testRes = await checkProxyAlive(proxyOption, 3500);
+        if (testRes && testRes.alive) {
+          console.log(`   \x1b[32m[✓ LIVE]\x1b[0m Proxy hoạt động tốt (${testRes.latency}ms).`);
+          proxyStr = proxyOption;
+        } else {
+          console.warn(`   \x1b[31m[✗ DIE]\x1b[0m Proxy [${proxyOption}] không kết nối được! Chuyển sang tìm proxy ngẫu nhiên...`);
+          selectedProxyInfo = await getRandomShardProxy(this._apiUrl, this._headers, null);
+        }
       } else if (proxyOption === true) {
-        // Tự động lấy proxy có sẵn trong ShardBrowser
+        // Tự động tìm và kiểm tra 1 proxy sống có sẵn trong ShardBrowser
         selectedProxyInfo = await getRandomShardProxy(this._apiUrl, this._headers, process.env.PROXY_GROUP || null);
       }
 
@@ -312,11 +485,21 @@ class ShardProfileManager {
       ? ` | 🌐 Proxy: ${proxyStr}`
       : " | ⚡ Direct IP";
 
+    const fpObj = (fingerprint && typeof fingerprint === "object") ? { ...fingerprint } : {};
+    if (!fpObj.navigator || typeof fpObj.navigator !== "object") {
+      fpObj.navigator = {};
+    }
+    // Cố định ngôn ngữ trình duyệt là Tiếng Anh (en-US) để tránh lỗi giao diện đa ngôn ngữ
+    fpObj.navigator.language = "en-US";
+    fpObj.navigator.accept_language = "en-US,en;q=0.9";
+    fpObj.navigator.languages = ["en-US", "en"];
+    fpObj.icu_locale = "en-US";
+
     const profilePayload = {
       name: profileName,
       folder: this._folder,
       notes: `TabiToken CDP Flow cho ${accountEmail} lúc ${new Date().toLocaleTimeString()}${proxyDesc}`,
-      fingerprint: (fingerprint && typeof fingerprint === "object") ? fingerprint : {},
+      fingerprint: fpObj,
     };
 
     if (proxyId) {
@@ -695,6 +878,22 @@ async function executeTabiTokenFlow(page, account, keyName = "Auto_API_Key_01") 
       console.warn(`⚠️ Lỗi tải trang TabiToken: ${e.message}`);
     }
 
+    // Tự động kiểm tra và vượt cảnh báo chứng chỉ SSL Chrome nếu xuất hiện
+    try {
+      const isCertError = await page.evaluate(() => {
+        const txt = document.body ? document.body.innerText : "";
+        return txt.includes("Your connection is not private") || txt.includes("NET::ERR_CERT") || document.querySelector("#details-button") !== null;
+      }).catch(() => false);
+
+      if (isCertError) {
+        console.log("🔓 [SSL Bypass] Phát hiện cảnh báo SSL Chrome ('Your connection is not private'). Đang tự động bấm 'Advanced' -> 'Proceed'...");
+        await page.click("#details-button").catch(() => {});
+        await sleep(500);
+        await page.click("#proceed-link").catch(() => {});
+        await sleep(2000);
+      }
+    } catch {}
+
     const pollStart = Date.now();
     while (Date.now() - pollStart < 25000) {
       let curUrl = "";
@@ -1040,8 +1239,34 @@ async function processAccount(shardManager, account, index, total, isHeadless) {
 
     await sleep(2000);
 
+    const applyEnglishLocale = async (targetPage) => {
+      try {
+        await targetPage.setExtraHTTPHeaders({
+          "Accept-Language": "en-US,en;q=0.9",
+        }).catch(() => {});
+        await targetPage.evaluateOnNewDocument(() => {
+          try {
+            Object.defineProperty(navigator, "language", { get: () => "en-US" });
+            Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+          } catch {}
+        }).catch(() => {});
+
+        // Bỏ qua lỗi SSL ở tầng CDP để Chrome không hiện trang cảnh báo đỏ
+        const client = await targetPage.target().createCDPSession();
+        await client.send("Security.setIgnoreCertificateErrors", { ignore: true }).catch(() => {});
+      } catch {}
+    };
+
+    browser.on("targetcreated", async (target) => {
+      try {
+        const p = await target.page();
+        if (p) await applyEnglishLocale(p);
+      } catch {}
+    });
+
     const pages = await browser.pages();
     const page = pages.length > 0 ? pages[0] : await browser.newPage();
+    await applyEnglishLocale(page);
     await page.bringToFront().catch(() => {});
 
     // 3. Thực hiện toàn bộ luồng SeekAI/TabiToken chuẩn
@@ -1158,7 +1383,9 @@ async function main() {
     }
 
     if (i < accounts.length - 1) {
-      await sleep(2500);
+      const waitSeconds = Math.floor(Math.random() * (70 - 30 + 1)) + 30; // Random 30 - 70 giây
+      console.log(`\n⏳ [Nghỉ ngẫu nhiên] Đang chờ ${waitSeconds}s trước khi xử lý tài khoản tiếp theo...`);
+      await sleep(waitSeconds * 1000);
     }
   }
 

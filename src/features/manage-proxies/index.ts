@@ -5,5 +5,7 @@ export { BulkActionsBar } from "./ui/BulkActionsBar";
 export { ImportProxyButton } from "./ui/ImportProxyButton";
 export { NewProxyButton } from "./ui/NewProxyButton";
 export { BuyProxiesButton } from "./ui/BuyProxiesButton";
+export { CheckCleanProxyButton } from "./ui/CheckCleanProxyButton";
 export { ProxyRowActions } from "./ui/ProxyRowActions";
 export { RenameProxyCell } from "./ui/RenameProxyCell";
+

@@ -904,3 +904,124 @@ pub fn country_to_timezone(cc: &str) -> &'static str {
         _ => "UTC",
     }
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CleanReport {
+    pub total: usize,
+    pub kept: usize,
+    pub removed: usize,
+    pub removed_names: Vec<String>,
+}
+
+/// Strict HTTPS + SSL certificate test with latency threshold.
+/// Connects via proxy to `https://api.ipify.org` with strict certificate validation.
+/// Returns Ok(latency_ms) if and only if HTTPS connects, TLS certificate is valid, AND latency <= max_latency_ms.
+pub async fn test_https_ssl(entry: &ProxyEntry, max_latency_ms: u128) -> Result<u128> {
+    let started = std::time::Instant::now();
+    let scheme = match entry.kind {
+        ProxyKind::Socks5 => "socks5h",
+        ProxyKind::Http => "http",
+        ProxyKind::Https => "https",
+    };
+    let proxy_url = if entry.username.is_empty() && entry.password.is_empty() {
+        format!("{scheme}://{}:{}", entry.host, entry.port)
+    } else {
+        let user = url::form_urlencoded::byte_serialize(entry.username.as_bytes()).collect::<String>();
+        let pass = url::form_urlencoded::byte_serialize(entry.password.as_bytes()).collect::<String>();
+        format!("{scheme}://{user}:{pass}@{}:{}", entry.host, entry.port)
+    };
+
+    let proxy = reqwest::Proxy::all(&proxy_url).context("bad proxy URL")?;
+    let client = reqwest::Client::builder()
+        .proxy(proxy)
+        .timeout(std::time::Duration::from_millis(max_latency_ms as u64))
+        .build()?;
+
+    let resp = client
+        .get("https://api.ipify.org")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        .send()
+        .await?;
+
+    let elapsed = started.elapsed().as_millis();
+    if resp.status().is_success() {
+        if elapsed > max_latency_ms {
+            anyhow::bail!("latency too high: {elapsed}ms > {max_latency_ms}ms");
+        }
+        Ok(elapsed)
+    } else {
+        anyhow::bail!("HTTP status: {}", resp.status());
+    }
+}
+
+/// Concurrently test all proxies for HTTPS + SSL certificate validity and low latency (<= 1500ms).
+/// Any proxy that fails (Tunnel Fail, Bad SSL/Cert, Timeout, or Latency > 1500ms) is permanently deleted from ShardBrowser.
+pub async fn check_and_clean(max_latency_ms: u128) -> Result<CleanReport> {
+    let store = load()?;
+    let total = store.proxies.len();
+    if total == 0 {
+        return Ok(CleanReport {
+            total: 0,
+            kept: 0,
+            removed: 0,
+            removed_names: vec![],
+        });
+    }
+
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+
+    let sem = Arc::new(Semaphore::new(15));
+    let mut handles = Vec::with_capacity(total);
+
+    for p in store.proxies {
+        let sem = Arc::clone(&sem);
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await;
+            let res = test_https_ssl(&p, max_latency_ms).await;
+            (p, res.is_ok())
+        }));
+    }
+
+    let mut kept_proxies = Vec::new();
+    let mut removed_names = Vec::new();
+    let mut removed_ids = Vec::new();
+
+    for h in handles {
+        if let Ok((p, is_ok)) = h.await {
+            if is_ok {
+                kept_proxies.push(p);
+            } else {
+                removed_names.push(format!("{}:{} ({})", p.host, p.port, p.name));
+                removed_ids.push(p.id);
+            }
+        }
+    }
+
+    let kept = kept_proxies.len();
+    let removed = removed_names.len();
+
+    // Persist kept proxies
+    save(&ProxyStore { proxies: kept_proxies })?;
+
+    // Wipe test history for removed proxies
+    if let Ok(mut hs) = load_history() {
+        let mut history_changed = false;
+        for id in removed_ids {
+            if hs.by_proxy.remove(&id).is_some() {
+                history_changed = true;
+            }
+        }
+        if history_changed {
+            let _ = save_history(&hs);
+        }
+    }
+
+    Ok(CleanReport {
+        total,
+        kept,
+        removed,
+        removed_names,
+    })
+}
+

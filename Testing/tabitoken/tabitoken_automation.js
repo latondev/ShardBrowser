@@ -191,7 +191,12 @@ async function createApiKey(page) {
   });
 
   try {
-    const context = await browser.newContext();
+    const context = await browser.newContext({
+      locale: "en-US",
+      extraHTTPHeaders: {
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
     const page = await context.newPage();
 
     await page.goto(SIGNUP_URL, {
