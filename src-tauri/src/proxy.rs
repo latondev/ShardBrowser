@@ -38,23 +38,15 @@ pub struct ProxyEntry {
 }
 
 impl ProxyEntry {
-    /// Build `--proxy-server=<scheme>://[user:pass@]host:port` for ShardX.
+    /// Build `--proxy-server=<scheme>://host:port` for ShardX / Chromium.
+    /// Chromium command line strictly rejects user:pass@ in --proxy-server and causes ERR_NO_SUPPORTED_PROXIES.
     pub fn to_proxy_server_arg(&self) -> String {
         let scheme = match self.kind {
             ProxyKind::Socks5 => "socks5",
             ProxyKind::Http => "http",
             ProxyKind::Https => "https",
         };
-        let host_port = format!("{}:{}", self.host, self.port);
-        if self.username.is_empty() && self.password.is_empty() {
-            format!("{scheme}://{host_port}")
-        } else {
-            let user = url::form_urlencoded::byte_serialize(self.username.as_bytes())
-                .collect::<String>();
-            let pass = url::form_urlencoded::byte_serialize(self.password.as_bytes())
-                .collect::<String>();
-            format!("{scheme}://{user}:{pass}@{host_port}")
-        }
+        format!("{scheme}://{}:{}", self.host, self.port)
     }
 }
 

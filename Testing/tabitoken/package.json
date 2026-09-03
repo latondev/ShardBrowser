@@ -8,6 +8,8 @@
     "start": "node tabitoken_automation.js"
   },
   "dependencies": {
-    "playwright": "^1.55.0"
+    "axios": "^1.7.9",
+    "playwright": "^1.55.0",
+    "puppeteer-core": "^23.0.0"
   }
 }

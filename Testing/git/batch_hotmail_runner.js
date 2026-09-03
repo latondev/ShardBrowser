@@ -26,25 +26,44 @@
 
 import { existsSync, readFileSync, appendFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { AiAgentRunner } from "./ai_agent_runner.js";
 import { HotmailGraphClient } from "./hotmail_graph_client.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function resolveAccountFile(inputPath = "") {
+  if (inputPath && existsSync(inputPath)) return path.resolve(inputPath);
+  if (inputPath && existsSync(path.resolve(process.cwd(), inputPath))) return path.resolve(process.cwd(), inputPath);
+  if (inputPath && existsSync(path.resolve(__dirname, inputPath))) return path.resolve(__dirname, inputPath);
+  if (inputPath && existsSync(path.resolve(__dirname, "hotmail", path.basename(inputPath)))) return path.resolve(__dirname, "hotmail", path.basename(inputPath));
+
+  // Default fallback
+  const defaultLocal = path.join(__dirname, "hotmail", "Hotmail_2.txt");
+  if (existsSync(defaultLocal)) return defaultLocal;
+  const defaultRoot = path.join(process.cwd(), "Testing", "git", "hotmail", "Hotmail_2.txt");
+  if (existsSync(defaultRoot)) return defaultRoot;
+
+  return defaultLocal;
+}
 
 export class BatchHotmailRunner {
   _filePath = "";
   _cooldownSeconds = 15;
-  _proxyMode = "rotate"; // "direct" | "shard" | "rotate"
-  _proxyGroup = "vn";
+  _proxyMode = "shard"; // "direct" | "shard" | "rotate"
+  _proxyGroup = "all";
   _accounts = [];
   _successCount = 0;
   _failedCount = 0;
   _currentRunner = null;
   _isStopping = false;
 
-  constructor(filePath = "", cooldownSeconds = 15, proxyMode = "rotate", proxyGroup = "vn") {
-    this._filePath = filePath || path.join(process.cwd(), "Testing", "git", "hotmail", "Hotmail_2.txt");
+  constructor(filePath = "", cooldownSeconds = 15, proxyMode = "shard", proxyGroup = "all") {
+    this._filePath = resolveAccountFile(filePath);
     this._cooldownSeconds = Number(cooldownSeconds) || 15;
-    this._proxyMode = proxyMode || "rotate";
-    this._proxyGroup = proxyGroup || "vn";
+    this._proxyMode = proxyMode || "shard";
+    this._proxyGroup = proxyGroup || "all";
 
     // Lắng nghe tín hiệu dừng an toàn (Ctrl + C)
     process.on("SIGINT", async () => {
@@ -173,10 +192,10 @@ export class BatchHotmailRunner {
 // Helper phân tích command line arguments
 function parseCommandLineArgs() {
   const args = process.argv.slice(2);
-  let filePath = path.join(process.cwd(), "Testing", "git", "hotmail", "Hotmail_2.txt");
+  let filePath = "";
   let cooldownSec = 15;
-  let proxyMode = "rotate";
-  let proxyGroup = "vn";
+  let proxyMode = "shard";
+  let proxyGroup = "all";
 
   for (const arg of args) {
     if (arg.startsWith("--file=")) {

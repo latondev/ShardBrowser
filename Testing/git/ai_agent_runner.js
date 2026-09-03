@@ -139,6 +139,28 @@ export class AiAgentRunner {
     return Math.floor(Math.random() * (max - min + 1)) + min;
   }
 
+  // Đọc danh sách Proxies được cấu hình trong ShardBrowser
+  _loadLocalProxies() {
+    const homeDir = os.homedir();
+    const candidatePaths = [
+      process.env.APPDATA ? path.join(process.env.APPDATA, "shardx-launcher", "proxies.json") : null,
+      path.join(homeDir, ".config", "shardx-launcher", "proxies.json"),
+      path.join(homeDir, "AppData", "Roaming", "shardx-launcher", "proxies.json")
+    ].filter(Boolean);
+
+    for (const p of candidatePaths) {
+      if (existsSync(p)) {
+        try {
+          const raw = readFileSync(p, "utf-8");
+          const data = JSON.parse(raw);
+          if (Array.isArray(data)) return data;
+          if (data && Array.isArray(data.proxies)) return data.proxies;
+        } catch {}
+      }
+    }
+    return [];
+  }
+
   // Bọc thực thi promise với timeout an toàn chống treo
   async _evalWithTimeout(promise, ms = 3000) {
     let timeoutId;
@@ -934,34 +956,38 @@ export class AiAgentRunner {
       if (effectiveMode === "direct") {
         console.log("🌐 [Network Mode: DIRECT] Sử dụng IP mạng trực tiếp của máy tính (Không dùng Proxy).");
       } else if (effectiveMode === "shard") {
-        const targetGroup = (options.proxyGroup || this._proxyGroup || "vn").trim().toLowerCase();
-        console.log(`🌐 [Network Mode: SHARD] Đang lấy Proxy thuộc nhóm [${targetGroup.toUpperCase()}] trong ShardBrowser...`);
+        const targetGroup = (options.proxyGroup || this._proxyGroup || "all").trim().toLowerCase();
+        console.log(`🌐 [Network Mode: SHARD] Đang lấy ngẫu nhiên Proxy ${targetGroup === 'all' ? 'toàn bộ pool' : `thuộc nhóm/quốc gia [${targetGroup.toUpperCase()}]`} trong ShardBrowser...`);
         try {
-          const localList = this._loadLocalProxies();
-          if (Array.isArray(localList) && localList.length > 0) {
-            const groupProxies = localList.filter(p => (p.folder || "").trim().toLowerCase() === targetGroup);
-            const candidateList = groupProxies.length > 0 ? groupProxies : localList;
+          let list = this._loadLocalProxies();
+          if (!Array.isArray(list) || list.length === 0) {
+            const { data: proxies } = await axios.get(`${this._launcherApiUrl}/proxies`, { headers: this._headers, timeout: 3000 });
+            if (Array.isArray(proxies)) list = proxies;
+          }
+
+          if (Array.isArray(list) && list.length > 0) {
+            let candidateList = list;
+            if (targetGroup && targetGroup !== "all") {
+              const matched = list.filter(p => 
+                (p.folder || "").trim().toLowerCase() === targetGroup ||
+                (p.country || "").trim().toLowerCase() === targetGroup
+              );
+              if (matched.length > 0) candidateList = matched;
+            }
 
             if (options.proxyId) {
               chosenProxy = candidateList.find(p => p.id === options.proxyId);
             }
             if (!chosenProxy) {
-              chosenProxy = candidateList[Math.floor(Math.random() * candidateList.length)];
+              // Chọn ngẫu nhiên 1 proxy trong danh sách
+              const randIdx = Math.floor(Math.random() * candidateList.length);
+              chosenProxy = candidateList[randIdx];
             }
             this._activeProxy = chosenProxy;
-            const authInfo = chosenProxy.username ? ` | User: ${chosenProxy.username}` : " | No Auth";
-            console.log(`🌐 [Proxy ShardX Local - Group: ${chosenProxy.folder || targetGroup}] Đã chọn Proxy: [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | Country: ${chosenProxy.country || 'VN'}`);
+            const authInfo = (chosenProxy.username || chosenProxy.user) ? ` | User: ${chosenProxy.username || chosenProxy.user}` : " | No Auth";
+            console.log(`🎲 [Random Proxy ShardX] #${randIdx !== undefined ? randIdx + 1 : 1}/${candidateList.length} -> [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | 🌍 Country: ${chosenProxy.country || 'Auto'}`);
           } else {
-            const { data: proxies } = await axios.get(`${this._launcherApiUrl}/proxies`, { headers: this._headers, timeout: 3000 });
-            if (Array.isArray(proxies) && proxies.length > 0) {
-              const groupProxies = proxies.filter(p => (p.folder || "").trim().toLowerCase() === targetGroup);
-              const candidateList = groupProxies.length > 0 ? groupProxies : proxies;
-              chosenProxy = candidateList[Math.floor(Math.random() * candidateList.length)];
-              this._activeProxy = chosenProxy;
-              console.log(`🌐 [Proxy ShardX Remote - Group: ${chosenProxy.folder || targetGroup}] Đã chọn Proxy: ${chosenProxy.host}:${chosenProxy.port}`);
-            } else {
-              console.log("ℹ️ [ShardX] Không có proxy nào được lưu trong Shard -> Chạy IP Direct.");
-            }
+            console.log("ℹ️ [ShardX] Không có proxy nào được lưu trong Shard -> Chạy IP Direct.");
           }
         } catch (proxyErr) {
           console.warn(`⚠️ [Proxy ShardX] Không lấy được proxy (${proxyErr.message}) -> Chạy IP Direct.`);
@@ -1201,13 +1227,31 @@ export class AiAgentRunner {
         }
       };
 
-      await applyProxyAuth(firstPage);
+      // Tự động áp dụng stealth chống phát hiện automation / bot
+      const applyPageStealth = async (p) => {
+        if (!p || p.isClosed()) return;
+        try {
+          await p.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+            if (!window.chrome) window.chrome = {};
+            if (!window.chrome.runtime) window.chrome.runtime = {};
+            Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
+            Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+          });
+        } catch {}
+      };
 
-      // Tự động áp dụng xác thực Proxy cho tất cả các tab mới
+      await applyProxyAuth(firstPage);
+      await applyPageStealth(firstPage);
+
+      // Tự động áp dụng xác thực Proxy và Stealth cho tất cả các tab mới
       this._browser.on("targetcreated", async (target) => {
         try {
           const newP = await target.page();
-          if (newP) await applyProxyAuth(newP);
+          if (newP) {
+            await applyProxyAuth(newP);
+            await applyPageStealth(newP);
+          }
         } catch {}
       });
 
