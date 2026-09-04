@@ -1,0 +1,13 @@
+{
+  "name": "github-auto-suite",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node batch_hotmail_runner.js --shard --cooldown=30",
+    "hotmail:shard": "node batch_hotmail_runner.js --shard --cooldown=30",
+    "hotmail:direct": "node batch_hotmail_runner.js --direct --cooldown=30",
+    "gmail:batch": "node batch_runner.js 10 20",
+    "check-quota": "node check_rapidapi_quota.js"
+  }
+}

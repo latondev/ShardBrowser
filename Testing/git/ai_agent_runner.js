@@ -27,6 +27,89 @@ import { HotmailGraphClient } from "./hotmail_graph_client.js";
 import { TotpClient } from "./totp_client.js";
 import { ProxyXoayClient } from "./proxyxoay_client.js";
 import { AccountStorageService } from "./account_storage.js";
+import net from "node:net";
+import tls from "node:tls";
+
+async function checkProxyFastAndLive(proxy, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    let isDone = false;
+    const finish = (val) => {
+      if (!isDone) {
+        isDone = true;
+        resolve(val);
+      }
+    };
+
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    const host = proxy.host;
+    const port = Number(proxy.port);
+    const kind = (proxy.kind || "http").toLowerCase();
+
+    const socket = net.connect({ host, port }, () => {
+      if (kind === "socks5") {
+        socket.write(Buffer.from([0x05, 0x01, 0x00]));
+      } else {
+        let authHeader = "";
+        if (proxy.username && proxy.password) {
+          const auth = Buffer.from(`${proxy.username}:${proxy.password}`).toString("base64");
+          authHeader = `Proxy-Authorization: Basic ${auth}\r\n`;
+        }
+        socket.write(`CONNECT github.com:443 HTTP/1.1\r\nHost: github.com:443\r\n${authHeader}\r\n`);
+      }
+    });
+
+    socket.setTimeout(timeoutMs, () => {
+      socket.destroy();
+      finish(false);
+    });
+
+    socket.on("data", (buf) => {
+      if (kind === "socks5") {
+        clearTimeout(timer);
+        socket.destroy();
+        const latency = Date.now() - start;
+        if (buf[0] === 0x05 && (buf[1] === 0x00 || buf[1] === 0x02)) {
+          if (latency > 1500) finish({ alive: false, tooSlow: true, latency });
+          else finish({ alive: true, latency });
+        } else finish(false);
+      } else {
+        const text = buf.toString("utf-8");
+        if (text.includes("200") || text.toLowerCase().includes("connection established")) {
+          const tlsSocket = tls.connect({
+            socket,
+            servername: "github.com",
+            rejectUnauthorized: true,
+          }, () => {
+            clearTimeout(timer);
+            const latency = Date.now() - start;
+            tlsSocket.destroy();
+            socket.destroy();
+            if (latency > 1500) finish({ alive: false, tooSlow: true, latency });
+            else finish({ alive: true, latency });
+          });
+
+          tlsSocket.on("error", (tlsErr) => {
+            clearTimeout(timer);
+            tlsSocket.destroy();
+            socket.destroy();
+            finish({ alive: false, sslError: tlsErr.message });
+          });
+        } else {
+          clearTimeout(timer);
+          socket.destroy();
+          finish(false);
+        }
+      }
+    });
+
+    socket.on("error", () => {
+      clearTimeout(timer);
+      socket.destroy();
+      finish(false);
+    });
+  });
+}
 
 // ==============================================================================
 // 1. CẤU HÌNH HỆ THỐNG
@@ -979,18 +1062,31 @@ export class AiAgentRunner {
               chosenProxy = candidateList.find(p => p.id === options.proxyId);
             }
             if (!chosenProxy) {
-              // Chọn ngẫu nhiên 1 proxy trong danh sách
-              const randIdx = Math.floor(Math.random() * candidateList.length);
-              chosenProxy = candidateList[randIdx];
+              console.log(`🌐 [Proxy Check] Đang kiểm tra để tìm 1 proxy NHANH & SỐNG (ping <= 1500ms, SSL chuẩn)...`);
+              const shuffled = [...candidateList].sort(() => Math.random() - 0.5);
+              const maxTests = Math.min(shuffled.length, 25);
+              for (let i = 0; i < maxTests; i++) {
+                const candidate = shuffled[i];
+                const res = await checkProxyFastAndLive(candidate, 2500);
+                if (res && res.alive && res.latency <= 1500) {
+                  chosenProxy = candidate;
+                  console.log(`   \x1b[32m[✓ PROXY LIVE & NHANH]\x1b[0m Đã chọn [${candidate.name || candidate.host}:${candidate.port}] (ping: ${res.latency}ms <= 1500ms)`);
+                  break;
+                }
+              }
             }
-            this._activeProxy = chosenProxy;
-            const authInfo = (chosenProxy.username || chosenProxy.user) ? ` | User: ${chosenProxy.username || chosenProxy.user}` : " | No Auth";
-            console.log(`🎲 [Random Proxy ShardX] #${randIdx !== undefined ? randIdx + 1 : 1}/${candidateList.length} -> [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | 🌍 Country: ${chosenProxy.country || 'Auto'}`);
+            if (chosenProxy) {
+              this._activeProxy = chosenProxy;
+              const authInfo = (chosenProxy.username || chosenProxy.user) ? ` | User: ${chosenProxy.username || chosenProxy.user}` : " | No Auth";
+              console.log(`🎲 [Selected Proxy ShardX] -> [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | 🌍 Country: ${chosenProxy.country || 'Auto'}`);
+            } else {
+              console.log("⚠️ [ShardX] Không có proxy nào dưới 1500ms -> Chạy Direct IP mạng nhà.");
+            }
           } else {
             console.log("ℹ️ [ShardX] Không có proxy nào được lưu trong Shard -> Chạy IP Direct.");
           }
         } catch (proxyErr) {
-          console.warn(`⚠️ [Proxy ShardX] Không lấy được proxy (${proxyErr.message}) -> Chạy IP Direct.`);
+          console.warn(`⚠️ [Proxy ShardX] Lỗi kiểm tra proxy (${proxyErr.message}) -> Chạy IP Direct.`);
         }
       } else {
         // "rotate" (mặc định)
