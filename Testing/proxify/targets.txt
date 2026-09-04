@@ -1,0 +1,4 @@
+# Danh sách các thư mục đích cần liên kết (Mỗi dòng 1 đường dẫn)
+# Bạn có thể thêm bao nhiêu dòng tùy thích, các dòng bắt đầu bằng # sẽ được bỏ qua
+
+D:\YTB\Resgiter_AI\Resgit\Seekai\proxify
