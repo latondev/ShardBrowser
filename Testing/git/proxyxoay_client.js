@@ -13,6 +13,13 @@
  */
 
 import axios from "axios";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CACHE_FILE = path.join(__dirname, ".last_proxy.json");
 
 export class ProxyXoayClient {
   // Private / Protected Properties
@@ -22,6 +29,14 @@ export class ProxyXoayClient {
 
   constructor(apiKey = null) {
     if (apiKey) this._apiKey = apiKey;
+    try {
+      if (existsSync(CACHE_FILE)) {
+        const cached = JSON.parse(readFileSync(CACHE_FILE, "utf-8"));
+        if (cached && cached.proxyString) {
+          this._lastProxy = cached;
+        }
+      }
+    } catch {}
   }
 
   // Helper chờ an toàn
@@ -43,6 +58,12 @@ export class ProxyXoayClient {
         const res = await axios.get(url, { timeout: 15000 });
         const data = res.data;
 
+        // Nếu status 101 và không bắt buộc đợi (forceWait == false), tái sử dụng proxy trước đó để chạy ngay
+        if (data.status === 101 && !options.forceWait && this._lastProxy) {
+          console.log(`⚡ [ProxyXoay] Tái sử dụng proxy còn hạn: [${this._lastProxy.proxyString}] (${data.message}) -> Bỏ qua chờ đợi để chạy ngay!`);
+          return this._lastProxy;
+        }
+
         // Xử lý status = 100 (Thành công)
         if (data.status === 100 || (data.status === 101 && (data.proxyhttp || this._lastProxy) && !options.forceWait)) {
           let rawProxy = data.proxyhttp || data.proxysocks5;
@@ -51,7 +72,7 @@ export class ProxyXoayClient {
           }
 
           if (!rawProxy && this._lastProxy) {
-            console.log(`ℹ️ [ProxyXoay] Sử dụng IP hiện tại: ${this._lastProxy.proxyString} (${data.message || 'Chưa đến lượt xoay'})`);
+            console.log(`⚡ [ProxyXoay] Tái sử dụng IP hiện tại: ${this._lastProxy.proxyString} (${data.message || 'Chưa đến lượt xoay'})`);
             return this._lastProxy;
           }
 
@@ -83,6 +104,9 @@ export class ProxyXoayClient {
             };
 
             this._lastProxy = result;
+            try {
+              writeFileSync(CACHE_FILE, JSON.stringify(result, null, 2), "utf-8");
+            } catch {}
             console.log(`✅ [ProxyXoay Thành Công]: [${result.proxyString}] | ISP: ${result.isp} | Vị trí: ${result.location} | IP: ${result.ip}`);
             return result;
           }

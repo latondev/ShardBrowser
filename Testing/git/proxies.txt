@@ -1,0 +1,17 @@
+# ==============================================================================
+# DANH SÁCH PROXY TĨNH CHO GITHUB RUNNER (KHÔNG CẦN GỌI API XOAY)
+# ==============================================================================
+# Thêm danh sách Proxy của bạn vào đây, mỗi dòng 1 proxy theo các định dạng sau:
+#
+# 1. IP:PORT
+#    Ví dụ: 103.145.2.10:8080
+#
+# 2. IP:PORT:USER:PASS
+#    Ví dụ: 103.145.2.10:8080:username:password
+#
+# 3. PROTOCOL://USER:PASS@IP:PORT
+#    Ví dụ: http://username:password@103.145.2.10:8080
+#    Ví dụ: socks5://username:password@103.145.2.10:1080
+#
+# Hệ thống sẽ tự động xáo trộn, kiểm tra kết nối sống (<1.5s) và gán cho Profile!
+# ==============================================================================

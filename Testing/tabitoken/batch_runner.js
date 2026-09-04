@@ -309,18 +309,33 @@ async function getRandomShardProxy(apiUrl, headers, group = null, maxCandidates 
 
   console.log(`🌐 [Proxy Check] Đang kiểm tra để tìm 1 proxy NHANH & SỐNG (ping <= 1500ms, SSL chuẩn)...`);
 
-  for (let i = 0; i < attempts; i++) {
-    const candidate = shuffled[i];
-    const label = candidate.name || `${candidate.host}:${candidate.port}`;
+  const batchSize = 4;
+  for (let i = 0; i < attempts; i += batchSize) {
+    const batch = shuffled.slice(i, i + batchSize);
+    console.log(`🔍 [Proxy Pool] Đang kiểm tra Batch ${Math.floor(i / batchSize) + 1} (${batch.map(p => p.name || `${p.host}:${p.port}`).join(", ")})... (lọc độ trễ < 1.5s)`);
 
-    const testRes = await checkProxyAlive(candidate, 2500);
-    if (testRes && testRes.alive && testRes.latency <= 1500) {
+    const batchResults = await Promise.all(
+      batch.map(async (candidate) => {
+        const testRes = await checkProxyAlive(candidate, 2500);
+        return { candidate, testRes };
+      })
+    );
+
+    const passed = batchResults.find(
+      (r) => r.testRes && r.testRes.alive && r.testRes.latency <= 1500
+    );
+    if (passed) {
+      const { candidate, testRes } = passed;
+      const label = candidate.name || `${candidate.host}:${candidate.port}`;
       console.log(`   \x1b[32m[✓ NHANH & LIVE]\x1b[0m Proxy [${label}] phản hồi mượt (${testRes.latency}ms <= 1500ms) -> ĐÃ CHỌN GÁN VÀO PROFILE!`);
       return candidate;
-    } else {
+    }
+
+    for (const item of batchResults) {
+      const label = item.candidate.name || `${item.candidate.host}:${item.candidate.port}`;
       let reason = "Không phản hồi";
-      if (testRes?.tooSlow) reason = `Quá chậm (${testRes.latency}ms > 1500ms)`;
-      else if (testRes?.sslError) reason = `Lỗi SSL: ${testRes.sslError}`;
+      if (item.testRes?.tooSlow) reason = `Quá chậm (${item.testRes.latency}ms > 1500ms)`;
+      else if (item.testRes?.sslError) reason = `Lỗi SSL: ${item.testRes.sslError}`;
       console.log(`   \x1b[31m[✗ BỎ QUA]\x1b[0m Proxy [${label}] (${reason}).`);
     }
   }
@@ -336,10 +351,10 @@ class ShardProfileManager {
   _apiUrl = "http://127.0.0.1:40325";
   _apiToken = "";
   _headers = {};
-  _folder = "TabiToken-Auto";
+  _folder = "Daily Tokken";
   _profileId = null;
 
-  constructor(folder = "TabiToken-Auto") {
+  constructor(folder = "Daily Tokken") {
     this._folder = folder;
     this._loadConfig();
   }
@@ -397,36 +412,39 @@ class ShardProfileManager {
     return res.json();
   }
 
-  async cleanupFolderProfiles(maxAllowed = 10) {
-    try {
-      const profiles = await this._fetchApi("/profiles", "GET");
-      if (!Array.isArray(profiles)) return;
-
-      const targetFolder = (this._folder || "TabiToken-Auto").trim().toLowerCase();
-      const folderProfiles = profiles.filter((p) => {
-        const pFolder = (p.folder || "").trim().toLowerCase();
-        return pFolder === targetFolder;
-      });
-
-      if (folderProfiles.length > maxAllowed) {
-        console.log(`🧹 [ShardBrowser Cleanup] Group [${this._folder}] có ${folderProfiles.length} profile (> ${maxAllowed}). Đang dọn dẹp...`);
-        for (const p of folderProfiles) {
-          if (this._profileId && p.id === this._profileId) continue;
-          if (p.running) {
-            await this._fetchApi(`/profiles/${p.id}/stop`, "POST", {}).catch(() => {});
-          }
-          await this._fetchApi(`/profiles/${p.id}`, "DELETE").catch(() => {});
-        }
-        console.log(`✨ [ShardBrowser Cleanup] Đã dọn dẹp profile cũ.`);
-      }
-    } catch (err) {
-      console.warn(`⚠️ [ShardBrowser Cleanup] ${err.message}`);
-    }
+  async cleanupFolderProfiles() {
+    // Lưu ý: Tuyệt đối không xóa profile trong group "Daily Tokken" theo yêu cầu
+    return;
   }
 
-  async createProfile(accountEmail, proxyOption = true) {
-    await this.cleanupFolderProfiles(10);
 
+
+  async createProfile(accountEmail, proxyOption = true) {
+    const cleanName = (accountEmail || "User").split("@")[0].replace(/[^a-zA-Z0-9_-]/g, "_");
+    const profileBaseName = `Tabi_${cleanName}`;
+
+    // 1. Kiểm tra nếu Profile đã tồn tại trong group "Daily Tokken" thì tái sử dụng, không xóa
+    try {
+      const profiles = await this._fetchApi("/profiles", "GET");
+      if (Array.isArray(profiles)) {
+        const targetFolder = (this._folder || "Daily Tokken").trim().toLowerCase();
+        const existing = profiles.find((p) => {
+          const pFolder = (p.folder || "").trim().toLowerCase();
+          const pName = (p.name || "").trim().toLowerCase();
+          const pNotes = (p.notes || "").toLowerCase();
+          return pFolder === targetFolder && (pName === profileBaseName.toLowerCase() || pNotes.includes((accountEmail || "").toLowerCase()));
+        });
+        if (existing) {
+          this._profileId = existing.id;
+          console.log(`🛡️ [ShardBrowser] Tái sử dụng Profile có sẵn trong group [${this._folder}]: [${existing.name}] (ID: ${this._profileId})`);
+          return this._profileId;
+        }
+      }
+    } catch (e) {
+      console.warn(`[ShardBrowser] Không kiểm tra được profile cũ: ${e.message}`);
+    }
+
+    // 2. Nếu chưa có thì sinh fingerprint mới
     let fingerprint = {};
     try {
       const fpRes = await this._fetchApi("/fingerprint/new/windows", "GET");
@@ -437,9 +455,7 @@ class ShardProfileManager {
       console.warn(`[ShardBrowser] Dùng Fingerprint mặc định (${e.message}).`);
     }
 
-    const cleanName = (accountEmail || "User").split("@")[0].replace(/[^a-zA-Z0-9_-]/g, "_");
-    const suffix = Date.now().toString().slice(-4);
-    const profileName = `Tabi_${cleanName}_${suffix}`;
+    const profileName = profileBaseName;
 
     // Xử lý gán Proxy vào Profile
     let proxyId = null;
@@ -533,16 +549,19 @@ class ShardProfileManager {
     throw new Error(`Không nhận được WebSocket CDP: ${JSON.stringify(startRes)}`);
   }
 
-  async destroyProfile() {
+  async stopBrowser() {
     if (!this._profileId) return;
     try {
       await this._fetchApi(`/profiles/${this._profileId}/stop`, "POST", {}).catch(() => {});
-      await this._fetchApi(`/profiles/${this._profileId}`, "DELETE").catch(() => {});
-      console.log(`🧹 [ShardBrowser] Đã giải phóng Profile ID [${this._profileId}]`);
-      this._profileId = null;
+      console.log(`⏹️ [ShardBrowser] Đã dừng phiên trình duyệt Profile ID [${this._profileId}] (Lưu giữ profile trong group "${this._folder}")`);
     } catch (err) {
-      console.warn(`⚠️ Lỗi khi đóng Profile: ${err.message}`);
+      console.warn(`⚠️ Lỗi khi dừng Profile: ${err.message}`);
     }
+  }
+
+  async destroyProfile() {
+    // Không xóa Profile khỏi group "Daily Tokken", chỉ đóng phiên trình duyệt
+    await this.stopBrowser();
   }
 }
 
@@ -895,7 +914,7 @@ async function executeTabiTokenFlow(page, account, keyName = "Auto_API_Key_01") 
     } catch {}
 
     const pollStart = Date.now();
-    while (Date.now() - pollStart < 25000) {
+    while (Date.now() - pollStart < 30000) {
       let curUrl = "";
       try { curUrl = page.url(); } catch {}
 
@@ -1232,9 +1251,9 @@ async function processAccount(shardManager, account, index, total, isHeadless) {
     console.log(`🔗 Đang kết nối Puppeteer vào CDP ShardBrowser...`);
 
     if (cdpEndpoint.startsWith("ws")) {
-      browser = await puppeteer.connect({ browserWSEndpoint: cdpEndpoint, defaultViewport: null });
+      browser = await puppeteer.connect({ browserWSEndpoint: cdpEndpoint, defaultViewport: null, protocolTimeout: 300000 });
     } else {
-      browser = await puppeteer.connect({ browserURL: cdpEndpoint, defaultViewport: null });
+      browser = await puppeteer.connect({ browserURL: cdpEndpoint, defaultViewport: null, protocolTimeout: 300000 });
     }
 
     await sleep(2000);
@@ -1295,7 +1314,7 @@ async function processAccount(shardManager, account, index, total, isHeadless) {
     if (browser) {
       await browser.disconnect().catch(() => {});
     }
-    await shardManager.destroyProfile();
+    await shardManager.stopBrowser();
   }
 }
 
@@ -1365,7 +1384,7 @@ async function main() {
     return;
   }
 
-  const shardManager = new ShardProfileManager("TabiToken-Auto");
+  const shardManager = new ShardProfileManager("Daily Tokken");
   const results = [];
 
   for (let i = 0; i < accounts.length; i++) {
@@ -1383,8 +1402,8 @@ async function main() {
     }
 
     if (i < accounts.length - 1) {
-      const waitSeconds = Math.floor(Math.random() * (70 - 30 + 1)) + 30; // Random 30 - 70 giây
-      console.log(`\n⏳ [Nghỉ ngẫu nhiên] Đang chờ ${waitSeconds}s trước khi xử lý tài khoản tiếp theo...`);
+      const waitSeconds = Math.floor(Math.random() * (20 - 10 + 1)) + 10; // Random 10s - 20s
+      console.log(`\n⏳ [Nghỉ ngẫu nhiên] Đang chờ ${waitSeconds}s (10s - 20s) trước khi xử lý tài khoản tiếp theo...`);
       await sleep(waitSeconds * 1000);
     }
   }

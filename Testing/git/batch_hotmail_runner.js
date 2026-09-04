@@ -51,7 +51,7 @@ function resolveAccountFile(inputPath = "") {
 export class BatchHotmailRunner {
   _filePath = "";
   _cooldownSeconds = 15;
-  _proxyMode = "shard"; // "direct" | "shard" | "rotate"
+  _proxyMode = "direct"; // "direct" | "shard" | "rotate"
   _proxyGroup = "all";
   _accounts = [];
   _successCount = 0;
@@ -145,18 +145,21 @@ export class BatchHotmailRunner {
       console.log(`<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<`);
 
       // Khởi tạo Runner với Hotmail Client & Proxy Mode & Proxy Group
+      const isInlineProxy = this._proxyMode.includes(":") || this._proxyMode.includes("//");
       const runner = new AiAgentRunner({
         hotmailClient: hotmailClient,
-        proxyMode: this._proxyMode,
+        proxyMode: isInlineProxy ? "shard" : this._proxyMode,
         proxyGroup: this._proxyGroup,
+        proxy: isInlineProxy ? this._proxyMode : undefined,
       });
       this._currentRunner = runner;
 
       try {
         const result = await runner.runFullE2EWorkflow({
           saveSecrets: true,
-          proxyMode: this._proxyMode,
+          proxyMode: isInlineProxy ? "shard" : this._proxyMode,
           proxyGroup: this._proxyGroup,
+          proxy: isInlineProxy ? this._proxyMode : undefined,
         });
 
         this._successCount++;
@@ -194,7 +197,7 @@ function parseCommandLineArgs() {
   const args = process.argv.slice(2);
   let filePath = "";
   let cooldownSec = 15;
-  let proxyMode = "shard";
+  let proxyMode = "direct";
   let proxyGroup = "all";
 
   for (const arg of args) {
@@ -203,7 +206,12 @@ function parseCommandLineArgs() {
     } else if (arg.startsWith("--cooldown=")) {
       cooldownSec = parseInt(arg.replace(/^--cooldown=/, ""), 10) || 15;
     } else if (arg.startsWith("--proxy=")) {
-      proxyMode = arg.replace(/^--proxy=/, "").toLowerCase().trim();
+      const pVal = arg.replace(/^--proxy=/, "").trim();
+      if (["direct", "shard", "rotate"].includes(pVal.toLowerCase())) {
+        proxyMode = pVal.toLowerCase();
+      } else {
+        proxyMode = pVal;
+      }
     } else if (arg.startsWith("--group=") || arg.startsWith("--proxy-group=")) {
       proxyGroup = arg.replace(/^--(group|proxy-group)=/, "").toLowerCase().trim();
     } else if (arg === "--direct" || arg === "-d") {

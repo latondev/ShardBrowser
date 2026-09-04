@@ -111,6 +111,60 @@ async function checkProxyFastAndLive(proxy, timeoutMs = 2500) {
   });
 }
 
+function parseProxyLine(rawLine) {
+  if (!rawLine || typeof rawLine !== "string") return null;
+  const line = rawLine.trim();
+  if (!line || line.startsWith("#")) return null;
+
+  try {
+    if (line.includes("://")) {
+      const parsed = new URL(line);
+      const kind = parsed.protocol.replace(":", "").toLowerCase();
+      return {
+        id: `file_${parsed.hostname}_${parsed.port}`,
+        name: `${parsed.hostname}:${parsed.port}`,
+        host: parsed.hostname,
+        port: Number(parsed.port) || (kind === "socks5" ? 1080 : 8080),
+        kind: kind === "https" ? "http" : kind,
+        username: decodeURIComponent(parsed.username || ""),
+        password: decodeURIComponent(parsed.password || ""),
+        proxyString: line,
+        folder: "proxify",
+      };
+    }
+
+    const parts = line.split(":");
+    if (parts.length === 2) {
+      const [host, port] = parts;
+      return {
+        id: `file_${host}_${port}`,
+        name: `${host}:${port}`,
+        host: host.trim(),
+        port: Number(port.trim()),
+        kind: "http",
+        username: "",
+        password: "",
+        proxyString: `http://${host.trim()}:${port.trim()}`,
+        folder: "proxify",
+      };
+    } else if (parts.length === 4) {
+      const [host, port, user, pass] = parts;
+      return {
+        id: `file_${host}_${port}`,
+        name: `${host}:${port}`,
+        host: host.trim(),
+        port: Number(port.trim()),
+        kind: "http",
+        username: user.trim(),
+        password: pass.trim(),
+        proxyString: `http://${user.trim()}:${pass.trim()}@${host.trim()}:${port.trim()}`,
+        folder: "proxify",
+      };
+    }
+  } catch {}
+  return null;
+}
+
 // ==============================================================================
 // 1. CẤU HÌNH HỆ THỐNG
 // ==============================================================================
@@ -164,8 +218,8 @@ export class AiAgentRunner {
   _profileId = null;
   _isCreatedProfile = false;
   _activeProxy = null;
-  _proxyMode = "rotate"; // "rotate" | "shard" | "direct"
-  _proxyGroup = "vn";
+  _proxyMode = "direct"; // "direct" | "shard" | "rotate"
+  _proxyGroup = "all";
   _gmailClient = null;
   _mailTm = null;
   _hotmailClient = null;
@@ -190,8 +244,8 @@ export class AiAgentRunner {
     this._launcherApiUrl = process.env.LAUNCHER_API_URL || liveConfig.url;
     this._launcherToken = process.env.LAUNCHER_API_TOKEN || liveConfig.token;
     this._headers = { Authorization: `Bearer ${this._launcherToken}` };
-    this._proxyMode = customConfig.proxyMode || process.env.PROXY_MODE || "rotate";
-    this._proxyGroup = customConfig.proxyGroup || process.env.PROXY_GROUP || "vn";
+    this._proxyMode = customConfig.proxyMode || process.env.PROXY_MODE || "direct";
+    this._proxyGroup = customConfig.proxyGroup || process.env.PROXY_GROUP || "all";
     this._gmailClient = new GmailCreatorClient(customConfig.rapidApiKey);
     this._mailTm = new MailTmClient();
     this._totp = new TotpClient();
@@ -222,8 +276,21 @@ export class AiAgentRunner {
     return Math.floor(Math.random() * (max - min + 1)) + min;
   }
 
-  // Đọc danh sách Proxies được cấu hình trong ShardBrowser
+  // Đọc danh sách Proxies từ ShardBrowser proxies.json và các file text (proxies_protocol.txt, proxies.txt)
   _loadLocalProxies() {
+    const list = [];
+    const seen = new Set();
+
+    const addEntry = (item) => {
+      if (!item || !item.host || !item.port) return;
+      const key = `${item.host}:${item.port}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push(item);
+      }
+    };
+
+    // 1. Đọc danh sách từ cấu hình ShardBrowser proxies.json
     const homeDir = os.homedir();
     const candidatePaths = [
       process.env.APPDATA ? path.join(process.env.APPDATA, "shardx-launcher", "proxies.json") : null,
@@ -236,12 +303,95 @@ export class AiAgentRunner {
         try {
           const raw = readFileSync(p, "utf-8");
           const data = JSON.parse(raw);
-          if (Array.isArray(data)) return data;
-          if (data && Array.isArray(data.proxies)) return data.proxies;
+          const entries = Array.isArray(data) ? data : (data && Array.isArray(data.proxies) ? data.proxies : []);
+          for (const item of entries) addEntry(item);
         } catch {}
       }
     }
-    return [];
+
+    // 2. Đọc danh sách từ file text cá nhân (ưu tiên cao nhất)
+    const priorityTextFiles = [
+      path.resolve(process.cwd(), "Testing", "git", "proxies.txt"),
+      path.resolve(__dirname, "proxies.txt"),
+      path.resolve(process.cwd(), "Testing", "git", "proxies_protocol.txt"),
+      path.resolve(process.cwd(), "proxies.txt"),
+    ];
+
+    for (const fp of priorityTextFiles) {
+      if (existsSync(fp)) {
+        try {
+          const content = readFileSync(fp, "utf-8");
+          const lines = content.split(/\r?\n/);
+          for (const line of lines) {
+            const parsed = parseProxyLine(line);
+            if (parsed) addEntry(parsed);
+          }
+        } catch {}
+      }
+    }
+
+    // 3. Chỉ khi chưa có proxy nào mới quét thêm file công cộng Testing/proxify (dự phòng)
+    if (list.length === 0) {
+      const fallbackFiles = [
+        path.resolve(process.cwd(), "Testing", "proxify", "proxies_protocol.txt"),
+        path.resolve(process.cwd(), "Testing", "proxify", "proxies_protocol.bak.txt"),
+      ];
+      for (const fp of fallbackFiles) {
+        if (existsSync(fp)) {
+          try {
+            const content = readFileSync(fp, "utf-8");
+            const lines = content.split(/\r?\n/);
+            for (const line of lines) {
+              const parsed = parseProxyLine(line);
+              if (parsed) addEntry(parsed);
+            }
+          } catch {}
+        }
+      }
+    }
+
+    return list;
+  }
+
+  // Cơ chế xáo trộn ngẫu nhiên và kiểm tra proxy sống siêu tốc (< 1.5s / 1500ms)
+  async _findFastLiveProxy(candidateList, maxTests = 35) {
+    if (!Array.isArray(candidateList) || candidateList.length === 0) return null;
+
+    console.log(`🌐 [Proxy Pool] Tìm thấy ${candidateList.length} proxy khả dụng. Bắt đầu xáo trộn ngẫu nhiên và kiểm tra độ trễ < 1.5s (1500ms)...`);
+    const shuffled = [...candidateList].sort(() => Math.random() - 0.5);
+    const limit = Math.min(shuffled.length, maxTests);
+
+    // Kiểm tra theo cụm (Batch 4 proxies song song) để phản hồi trong 1-2 giây
+    const batchSize = 4;
+    for (let i = 0; i < limit; i += batchSize) {
+      const batch = shuffled.slice(i, i + batchSize);
+      console.log(`🔍 [Đang kiểm tra Batch ${Math.floor(i / batchSize) + 1}] (${batch.map(p => `${p.host}:${p.port}`).join(", ")})...`);
+
+      const batchResults = await Promise.all(
+        batch.map(async (candidate) => {
+          const res = await checkProxyFastAndLive(candidate, 2500);
+          return { candidate, res };
+        })
+      );
+
+      // Ưu tiên chọn proxy sống và có ping <= 1500ms
+      const passed = batchResults.find(r => r.res && r.res.alive && r.res.latency <= 1500);
+      if (passed) {
+        const { candidate, res } = passed;
+        candidate._verifiedLatency = res.latency;
+        console.log(`   \x1b[32m[✓ PROXY LIVE & NHANH]\x1b[0m Đã chọn [${candidate.host}:${candidate.port}] (ping: ${res.latency}ms <= 1500ms)`);
+        return candidate;
+      }
+
+      // In log cảnh báo các proxy chậm
+      for (const item of batchResults) {
+        if (item.res && item.res.tooSlow) {
+          console.log(`   \x1b[33m[✗ BỎ QUA - CHẬM]\x1b[0m [${item.candidate.host}:${item.candidate.port}] ping ${item.res.latency}ms > 1500ms`);
+        }
+      }
+    }
+
+    return null;
   }
 
   // Bọc thực thi promise với timeout an toàn chống treo
@@ -995,18 +1145,6 @@ export class AiAgentRunner {
     return { alreadyEnabled: false, setupKey, recoveryCodes };
   }
 
-  // Đọc danh sách proxy từ proxies.json cục bộ để lấy đầy đủ username và password
-  _loadLocalProxies() {
-    try {
-      const roamingPath = path.join(os.homedir(), "AppData", "Roaming", "shardx-launcher", "proxies.json");
-      if (existsSync(roamingPath)) {
-        const data = JSON.parse(readFileSync(roamingPath, "utf8"));
-        return data.proxies || [];
-      }
-    } catch {}
-    return [];
-  }
-
   // KẾT NỐI TRÌNH DUYỆT TÁCH BIỆT 100% (ROTATING PROXY + NEW FINGERPRINT)
   async _connectOrLaunchBrowser(options = {}) {
     const envWs = process.env.BROWSER_WS_ENDPOINT || process.env.BROWSER_USE_CDP_WS || options.wsEndpoint;
@@ -1032,19 +1170,26 @@ export class AiAgentRunner {
       // BƯỚC 0: TỰ ĐỘNG XÓA SẠCH TOÀN BỘ PROFILE CŨ TRONG SHARDBROWSER
       await this._deleteAllOldProfiles();
 
-      // BƯỚC 1: LỰA CHỌN PROXY THEO CHẾ ĐỘ CẤU HÌNH (direct | shard | rotate)
-      const effectiveMode = options.proxyMode || this._proxyMode || "rotate";
+      // BƯỚC 1: LỰA CHỌN PROXY THEO CHẾ ĐỘ CẤU HÌNH (direct | shard | rotate | inline static proxy)
+      const effectiveMode = options.proxy || options.proxyMode || this._proxyMode || "direct";
       let chosenProxy = null;
 
-      if (effectiveMode === "direct") {
+      if (options.proxy || (typeof effectiveMode === "string" && (effectiveMode.includes(":") || effectiveMode.includes("//")))) {
+        const rawProxy = options.proxy || effectiveMode;
+        chosenProxy = parseProxyLine(rawProxy);
+        if (chosenProxy) {
+          this._activeProxy = chosenProxy;
+          console.log(`🌐 [Network Mode: STATIC PROXY] Đã gán Proxy thủ công: [${chosenProxy.host}:${chosenProxy.port}] (Không gọi API xoay).`);
+        }
+      } else if (effectiveMode === "direct") {
         console.log("🌐 [Network Mode: DIRECT] Sử dụng IP mạng trực tiếp của máy tính (Không dùng Proxy).");
       } else if (effectiveMode === "shard") {
         const targetGroup = (options.proxyGroup || this._proxyGroup || "all").trim().toLowerCase();
-        console.log(`🌐 [Network Mode: SHARD] Đang lấy ngẫu nhiên Proxy ${targetGroup === 'all' ? 'toàn bộ pool' : `thuộc nhóm/quốc gia [${targetGroup.toUpperCase()}]`} trong ShardBrowser...`);
+        console.log(`🌐 [Network Mode: SHARD] Đang quét danh sách Proxy ${targetGroup === 'all' ? 'toàn bộ pool' : `thuộc nhóm [${targetGroup.toUpperCase()}]`}...`);
         try {
           let list = this._loadLocalProxies();
           if (!Array.isArray(list) || list.length === 0) {
-            const { data: proxies } = await axios.get(`${this._launcherApiUrl}/proxies`, { headers: this._headers, timeout: 3000 });
+            const { data: proxies } = await axios.get(`${this._launcherApiUrl}/proxies`, { headers: this._headers, timeout: 3000 }).catch(() => ({ data: [] }));
             if (Array.isArray(proxies)) list = proxies;
           }
 
@@ -1062,28 +1207,17 @@ export class AiAgentRunner {
               chosenProxy = candidateList.find(p => p.id === options.proxyId);
             }
             if (!chosenProxy) {
-              console.log(`🌐 [Proxy Check] Đang kiểm tra để tìm 1 proxy NHANH & SỐNG (ping <= 1500ms, SSL chuẩn)...`);
-              const shuffled = [...candidateList].sort(() => Math.random() - 0.5);
-              const maxTests = Math.min(shuffled.length, 25);
-              for (let i = 0; i < maxTests; i++) {
-                const candidate = shuffled[i];
-                const res = await checkProxyFastAndLive(candidate, 2500);
-                if (res && res.alive && res.latency <= 1500) {
-                  chosenProxy = candidate;
-                  console.log(`   \x1b[32m[✓ PROXY LIVE & NHANH]\x1b[0m Đã chọn [${candidate.name || candidate.host}:${candidate.port}] (ping: ${res.latency}ms <= 1500ms)`);
-                  break;
-                }
-              }
+              chosenProxy = await this._findFastLiveProxy(candidateList);
             }
             if (chosenProxy) {
               this._activeProxy = chosenProxy;
               const authInfo = (chosenProxy.username || chosenProxy.user) ? ` | User: ${chosenProxy.username || chosenProxy.user}` : " | No Auth";
-              console.log(`🎲 [Selected Proxy ShardX] -> [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | 🌍 Country: ${chosenProxy.country || 'Auto'}`);
+              console.log(`🎲 [Selected Proxy ShardX] -> [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | Ping: ${chosenProxy._verifiedLatency ? `${chosenProxy._verifiedLatency}ms` : '<1.5s'}`);
             } else {
-              console.log("⚠️ [ShardX] Không có proxy nào dưới 1500ms -> Chạy Direct IP mạng nhà.");
+              console.log("⚠️ [ShardX] Không có proxy nào còn sống và phản hồi dưới 1500ms -> Chạy Direct IP mạng nhà.");
             }
           } else {
-            console.log("ℹ️ [ShardX] Không có proxy nào được lưu trong Shard -> Chạy IP Direct.");
+            console.log("ℹ️ [ShardX] Không có proxy nào trong Shard/File -> Chạy IP Direct.");
           }
         } catch (proxyErr) {
           console.warn(`⚠️ [Proxy ShardX] Lỗi kiểm tra proxy (${proxyErr.message}) -> Chạy IP Direct.`);
@@ -1096,21 +1230,31 @@ export class AiAgentRunner {
             chosenProxy = await this._proxyXoay.getNewProxy({ protocol: "http" });
             this._activeProxy = chosenProxy;
           } catch (pxErr) {
-            console.warn(`⚠️ [ProxyXoay Warning] Không thể lấy proxy xoay: ${pxErr.message} -> Tìm proxy trong ShardBrowser...`);
+            console.warn(`⚠️ [ProxyXoay Warning] Không thể lấy proxy xoay: ${pxErr.message} -> Tìm proxy sống trong danh sách Shard/File...`);
           }
         }
 
-        // Fallback sang Proxy Shard (ưu tiên group vn) nếu xoay thất bại
+        // Fallback sang Proxy Shard/File (áp dụng cơ chế lọc nhanh < 1.5s) nếu xoay thất bại
         if (!chosenProxy) {
           try {
-            const localList = this._loadLocalProxies();
+            let localList = this._loadLocalProxies();
+            if (!Array.isArray(localList) || localList.length === 0) {
+              const { data: proxies } = await axios.get(`${this._launcherApiUrl}/proxies`, { headers: this._headers, timeout: 3000 }).catch(() => ({ data: [] }));
+              if (Array.isArray(proxies)) localList = proxies;
+            }
+
             if (Array.isArray(localList) && localList.length > 0) {
               const targetGroup = (options.proxyGroup || this._proxyGroup || "vn").trim().toLowerCase();
               const groupProxies = localList.filter(p => (p.folder || "").trim().toLowerCase() === targetGroup);
               const candidateList = groupProxies.length > 0 ? groupProxies : localList;
-              chosenProxy = candidateList[Math.floor(Math.random() * candidateList.length)];
-              this._activeProxy = chosenProxy;
-              console.log(`🌐 [Proxy ShardX Fallback - Group: ${chosenProxy.folder || targetGroup}] Chọn Proxy: [${chosenProxy.name || chosenProxy.host}]`);
+              
+              chosenProxy = await this._findFastLiveProxy(candidateList);
+              if (chosenProxy) {
+                this._activeProxy = chosenProxy;
+                console.log(`🌐 [Proxy Fallback - Group: ${chosenProxy.folder || targetGroup}] Đã chọn Proxy sống: [${chosenProxy.name || chosenProxy.host}:${chosenProxy.port}] (ping: ${chosenProxy._verifiedLatency ? `${chosenProxy._verifiedLatency}ms` : '<1.5s'})`);
+              } else {
+                console.log("⚠️ [Proxy Fallback] Không tìm thấy proxy sống <= 1500ms -> Chạy IP Direct.");
+              }
             }
           } catch (proxyErr) {
             console.log(`🌐 [Network] Chạy IP Direct (${proxyErr.message}).`);
@@ -1124,12 +1268,28 @@ export class AiAgentRunner {
       
       // BƯỚC 3: TẠO PROFILE MỚI THUỘC NHÓM 'GitHub-Auto'
       const sessionSuffix = Date.now().toString().slice(-4);
+      let formattedProxy = null;
+      if (chosenProxy) {
+        if (chosenProxy.proxyString) {
+          formattedProxy = chosenProxy.proxyString;
+        } else {
+          const kind = (chosenProxy.kind || "http").toLowerCase();
+          const user = chosenProxy.username || chosenProxy.user || "";
+          const pass = chosenProxy.password || chosenProxy.pass || "";
+          if (user && pass) {
+            formattedProxy = `${kind}://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${chosenProxy.host}:${chosenProxy.port}`;
+          } else {
+            formattedProxy = `${kind}://${chosenProxy.host}:${chosenProxy.port}`;
+          }
+        }
+      }
+
       const profilePayload = {
         name: `SHARDX-AUTO-${sessionSuffix}`,
         folder: "GitHub-Auto",
-        notes: `Tách biệt hoàn toàn | Proxy: ${chosenProxy ? chosenProxy.proxyString || `${chosenProxy.host}:${chosenProxy.port}` : 'Direct'} | ISP: ${chosenProxy?.isp || 'N/A'} | Time: ${new Date().toLocaleTimeString()}`,
-        proxy: chosenProxy ? (chosenProxy.proxyString || `http://${chosenProxy.host}:${chosenProxy.port}`) : null,
-        proxy_id: chosenProxy?.id || null,
+        notes: `Tách biệt hoàn toàn | Proxy: ${formattedProxy || 'Direct'} | Ping: ${chosenProxy?._verifiedLatency ? `${chosenProxy._verifiedLatency}ms` : '<1.5s'} | Time: ${new Date().toLocaleTimeString()}`,
+        proxy: formattedProxy,
+        proxy_id: chosenProxy?.id && !String(chosenProxy.id).startsWith("file_") ? chosenProxy.id : null,
         fingerprint: fpRes.fingerprint,
       };
 
@@ -1182,8 +1342,7 @@ export class AiAgentRunner {
         "--disable-dev-shm-usage",
         "--disable-accelerated-2d-canvas",
         "--disable-gpu",
-        "--window-size=1280,800",
-        "--disable-blink-features=AutomationControlled"
+        "--window-size=1280,800"
       ];
       if (this._activeProxy) {
         const proxyArg = this._activeProxy.proxyString ? this._activeProxy.proxyString.replace(/^https?:\/\//i, "") : `${this._activeProxy.host}:${this._activeProxy.port}`;
@@ -1323,30 +1482,14 @@ export class AiAgentRunner {
         }
       };
 
-      // Tự động áp dụng stealth chống phát hiện automation / bot
-      const applyPageStealth = async (p) => {
-        if (!p || p.isClosed()) return;
-        try {
-          await p.evaluateOnNewDocument(() => {
-            Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-            if (!window.chrome) window.chrome = {};
-            if (!window.chrome.runtime) window.chrome.runtime = {};
-            Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
-            Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
-          });
-        } catch {}
-      };
-
       await applyProxyAuth(firstPage);
-      await applyPageStealth(firstPage);
 
-      // Tự động áp dụng xác thực Proxy và Stealth cho tất cả các tab mới
+      // Tự động áp dụng xác thực Proxy cho tất cả các tab mới
       this._browser.on("targetcreated", async (target) => {
         try {
           const newP = await target.page();
           if (newP) {
             await applyProxyAuth(newP);
-            await applyPageStealth(newP);
           }
         } catch {}
       });
@@ -1426,7 +1569,11 @@ export class AiAgentRunner {
               const body = document.body ? document.body.innerText : "";
               const emailInput = document.querySelector("#email, input[type='email'], input[name='user[email]'], input[autocomplete='email']");
               const hasEmailInput = !!emailInput;
-              const isRateLimited = body.includes("Truy cập tạm thời bị hạn chế") || body.includes("Access restricted") || body.includes("robot on the same network");
+              const isRateLimited = body.includes("Truy cập tạm thời bị hạn chế") ||
+                                    body.includes("Access is temporarily restricted") ||
+                                    body.includes("Access restricted") ||
+                                    body.includes("unusual activity from your device or network") ||
+                                    body.includes("robot on the same network");
 
               return {
                 hasEmailInput,
@@ -1728,10 +1875,28 @@ export class AiAgentRunner {
 // 3. CLI ENTRYPOINT
 // ==============================================================================
 async function main() {
-  const runner = new AiAgentRunner();
+  const args = process.argv.slice(2);
+  let proxyMode = "direct"; // Mặc định chạy Direct máy tính, không chờ proxy
+  let proxyGroup = "vn";
+
+  for (const arg of args) {
+    if (arg === "--rotate" || arg === "-r") {
+      proxyMode = "rotate";
+    } else if (arg === "--shard" || arg === "-s") {
+      proxyMode = "shard";
+    } else if (arg === "--direct" || arg === "-d") {
+      proxyMode = "direct";
+    } else if (arg.startsWith("--group=")) {
+      proxyGroup = arg.replace(/^--group=/, "").trim();
+    }
+  }
+
+  const runner = new AiAgentRunner({ proxyMode, proxyGroup });
   try {
     await runner.runFullE2EWorkflow({
       saveSecrets: true,
+      proxyMode,
+      proxyGroup
     });
   } catch (error) {
     console.error(`\n❌ [Lỗi Hệ Thống]: ${error.message}`);

@@ -98,11 +98,6 @@ pub async fn launch_profile(
     cmd.arg(format!("--fingerprint-profile={}", fp_file.display()));
     cmd.arg(format!("--user-data-dir={}", udd.display()));
     cmd.arg("--no-first-run");
-    #[cfg(target_os = "windows")]
-    {
-        cmd.arg("--no-sandbox");
-        cmd.arg("--test-type");
-    }
 
     // Disable WebGPU when profile omits `webgpu` (matches real Linux Chrome).
     let webgpu_present = raw
