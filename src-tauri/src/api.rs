@@ -288,6 +288,13 @@ async fn create_temporary(Json(body): Json<TempReq>) -> ApiResult {
     })))
 }
 
+async fn clone_profile_ep(Path(id): Path<String>) -> ApiResult {
+    let pm = crate::profile::clone_profile(&id)
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    crate::notify_store_changed("profiles");
+    Ok(Json(serde_json::to_value(pm).unwrap_or(Value::Null)))
+}
+
 async fn delete_profile(Path(id): Path<String>) -> ApiResult {
     crate::profile::delete(&id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     crate::notify_store_changed("profiles");
@@ -617,7 +624,6 @@ async fn delete_proxy(Path(id): Path<String>) -> ApiResult {
 
 async fn list_proxies() -> ApiResult {
     let list = crate::proxy::list().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    // Credentials never exposed over API.
     let out: Vec<Value> = list
         .into_iter()
         .map(|p| {
@@ -627,6 +633,8 @@ async fn list_proxies() -> ApiResult {
                 "kind": p.kind,
                 "host": p.host,
                 "port": p.port,
+                "username": p.username,
+                "password": p.password,
                 "country": p.country,
                 "folder": p.folder,
                 "notes": p.notes,
@@ -686,6 +694,7 @@ pub async fn serve(secret: String, port: u16) {
         .route("/profiles", get(list_profiles).post(create_profile))
         .route("/profiles/temporary", post(create_temporary))
         .route("/profiles/:id", get(get_profile).patch(edit_profile).delete(delete_profile))
+        .route("/profiles/:id/clone", post(clone_profile_ep))
         .route("/profiles/:id/start", post(start_profile))
         .route("/profiles/:id/stop", post(stop_profile))
         .route("/profiles/:id/cookies", get(export_cookies).post(import_cookies))

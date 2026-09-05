@@ -53,17 +53,21 @@ export class BatchHotmailRunner {
   _cooldownSeconds = 15;
   _proxyMode = "direct"; // "direct" | "shard" | "rotate"
   _proxyGroup = "all";
+  _profile = null;
+  _cloneFrom = null;
   _accounts = [];
   _successCount = 0;
   _failedCount = 0;
   _currentRunner = null;
   _isStopping = false;
 
-  constructor(filePath = "", cooldownSeconds = 15, proxyMode = "shard", proxyGroup = "all") {
+  constructor(filePath = "", cooldownSeconds = 15, proxyMode = "shard", proxyGroup = "all", profile = null, cloneFrom = null) {
     this._filePath = resolveAccountFile(filePath);
     this._cooldownSeconds = Number(cooldownSeconds) || 15;
     this._proxyMode = proxyMode || "shard";
     this._proxyGroup = proxyGroup || "all";
+    this._profile = profile || null;
+    this._cloneFrom = cloneFrom || null;
 
     // Lắng nghe tín hiệu dừng an toàn (Ctrl + C)
     process.on("SIGINT", async () => {
@@ -132,6 +136,19 @@ export class BatchHotmailRunner {
     console.log(`⏱️ Nghỉ giữa  : ${this._cooldownSeconds}s mỗi tài khoản`);
     console.log("==================================================================\n");
 
+    // Đọc danh sách tài khoản đã đăng ký thành công trước đó để tự động bỏ qua
+    const doneEmails = new Set();
+    try {
+      const hotmailOutPath = path.join(process.cwd(), "Testing", "git", "hotmail", "github_accounts.txt");
+      if (existsSync(hotmailOutPath)) {
+        const outContent = readFileSync(hotmailOutPath, "utf8");
+        for (const outLine of outContent.split("\n")) {
+          const m = outLine.split("|")[0]?.trim().toLowerCase();
+          if (m) doneEmails.add(m);
+        }
+      }
+    } catch {}
+
     for (let i = 0; i < lines.length && !this._isStopping; i++) {
       const line = lines[i];
       const accIndex = i + 1;
@@ -140,17 +157,26 @@ export class BatchHotmailRunner {
       const hotmailClient = new HotmailGraphClient(line);
       const targetEmail = hotmailClient.email || `Line #${accIndex}`;
 
+      // Nếu tài khoản này đã có trong github_accounts.txt -> Bỏ qua ngay lập tức
+      if (hotmailClient.email && doneEmails.has(hotmailClient.email.trim().toLowerCase())) {
+        console.log(`\n⏭️ [BỎ QUA #${accIndex}/${lines.length}] Email [${hotmailClient.email}] đã được đăng ký thành công trước đó!`);
+        this._successCount++;
+        continue;
+      }
+
       console.log(`\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>`);
       console.log(`   [TIẾN ĐỘ: ${accIndex}/${lines.length}] -> ĐĂNG KÝ GITHUB CHO: ${targetEmail}`);
       console.log(`<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<`);
 
-      // Khởi tạo Runner với Hotmail Client & Proxy Mode & Proxy Group
+      // Khởi tạo Runner với Hotmail Client & Proxy Mode & Proxy Group & Profile / Clone
       const isInlineProxy = this._proxyMode.includes(":") || this._proxyMode.includes("//");
       const runner = new AiAgentRunner({
         hotmailClient: hotmailClient,
         proxyMode: isInlineProxy ? "shard" : this._proxyMode,
         proxyGroup: this._proxyGroup,
         proxy: isInlineProxy ? this._proxyMode : undefined,
+        profile: this._profile,
+        cloneFrom: this._cloneFrom,
       });
       this._currentRunner = runner;
 
@@ -160,6 +186,8 @@ export class BatchHotmailRunner {
           proxyMode: isInlineProxy ? "shard" : this._proxyMode,
           proxyGroup: this._proxyGroup,
           proxy: isInlineProxy ? this._proxyMode : undefined,
+          profile: this._profile,
+          cloneFrom: this._cloneFrom,
         });
 
         this._successCount++;
@@ -199,12 +227,18 @@ function parseCommandLineArgs() {
   let cooldownSec = 15;
   let proxyMode = "direct";
   let proxyGroup = "all";
+  let profile = null;
+  let cloneFrom = null;
 
   for (const arg of args) {
     if (arg.startsWith("--file=")) {
       filePath = arg.replace(/^--file=/, "").trim();
     } else if (arg.startsWith("--cooldown=")) {
       cooldownSec = parseInt(arg.replace(/^--cooldown=/, ""), 10) || 15;
+    } else if (arg.startsWith("--clone=") || arg.startsWith("--clone-from=") || arg.startsWith("--cloneFrom=")) {
+      cloneFrom = arg.replace(/^--(clone|clone-from|cloneFrom)=/, "").trim();
+    } else if (arg.startsWith("--profile=") || arg.startsWith("--profileId=") || arg.startsWith("--profile-id=")) {
+      profile = arg.replace(/^--(profile|profileId|profile-id)=/, "").trim();
     } else if (arg.startsWith("--proxy=")) {
       const pVal = arg.replace(/^--proxy=/, "").trim();
       if (["direct", "shard", "rotate"].includes(pVal.toLowerCase())) {
@@ -229,13 +263,13 @@ function parseCommandLineArgs() {
     }
   }
 
-  return { filePath, cooldownSec, proxyMode, proxyGroup };
+  return { filePath, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom };
 }
 
 // CLI Entrypoint
 async function main() {
-  const { filePath, cooldownSec, proxyMode, proxyGroup } = parseCommandLineArgs();
-  const batch = new BatchHotmailRunner(filePath, cooldownSec, proxyMode, proxyGroup);
+  const { filePath, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom } = parseCommandLineArgs();
+  const batch = new BatchHotmailRunner(filePath, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom);
   await batch.run();
 }
 

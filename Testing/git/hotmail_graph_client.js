@@ -71,15 +71,15 @@ export class HotmailGraphClient {
     if (!text) return null;
     const clean = String(text).replace(/<[^>]+>/g, " ");
 
-    // Ưu tiên 1: Cụm từ định danh của GitHub
-    const launchMatch = clean.match(/(?:launch code|verification code|verify your account|security code|mã xác minh|mã xác thực)[^\d]{0,20}(\d{6,8})/i);
+    // Ưu tiên 1: Cụm từ định danh của GitHub (Launch code / Verification code / Code is...)
+    const launchMatch = clean.match(/(?:launch code|verification code|verify your account|security code|enter the code|code is|mã xác minh|mã xác thực)[^\d]{0,40}(\d{6,8})/i);
     if (launchMatch && launchMatch[1]) return launchMatch[1].trim();
 
-    // Ưu tiên 2: Cụm số nằm trong dấu ngoặc vuông [ 12345678 ]
-    const bracketMatch = clean.match(/\[\s*(\d{6,8})\s*\]/);
+    // Ưu tiên 2: Cụm số nằm trong dấu ngoặc vuông [ 12345678 ] hoặc dấu nháy
+    const bracketMatch = clean.match(/\[\s*(\d{6,8})\s*\]/) || clean.match(/["'](\d{6,8})["']/);
     if (bracketMatch && bracketMatch[1]) return bracketMatch[1].trim();
 
-    // Ưu tiên 3: Bất kỳ chuỗi 6 hoặc 8 chữ số đứng độc lập (loại trừ năm 2024-2027)
+    // Ưu tiên 3: Bất kỳ chuỗi 6 hoặc 8 chữ số đứng độc lập (loại trừ các năm 2024-2027)
     const numMatches = clean.match(/\b\d{6,8}\b/g);
     if (numMatches) {
       for (const num of numMatches) {
@@ -177,13 +177,14 @@ export class HotmailGraphClient {
   }
 
   /**
-   * Lấy danh sách thư mới nhất từ Hộp thư đến (Inbox)
-   * @param {number} top Số lượng thư muốn lấy (mặc định: 10)
+   * Lấy danh sách thư mới nhất từ Hộp thư đến (Inbox) và Thư rác (Junk / All Messages)
+   * @param {number} top Số lượng thư muốn lấy (mặc định: 15)
    * @returns {Promise<Array>} Danh sách email
    */
-  async getInboxMessages(top = 10) {
+  async getInboxMessages(top = 15) {
     const token = await this.getAccessToken();
-    const url = `${this._graphBaseUrl}/me/mailFolders/inbox/messages?$top=${top}&$select=id,from,subject,bodyPreview,receivedDateTime,body`;
+    // Quét toàn bộ thư /me/messages (Bao gồm cả Inbox, Other và Thư rác Junk Email)
+    const url = `${this._graphBaseUrl}/me/messages?$top=${top}&$select=id,from,subject,bodyPreview,receivedDateTime,body&$orderby=receivedDateTime desc`;
 
     const res = await axios.get(url, {
       headers: {
@@ -201,16 +202,25 @@ export class HotmailGraphClient {
    * @param {object} options Các tùy chọn lọc và thời gian chờ
    * @param {string} options.filterSender Lọc theo email người gửi (ví dụ: 'github.com', 'noreply')
    * @param {string} options.filterSubject Lọc theo tiêu đề thư
-   * @param {number} options.timeoutMs Thời gian chờ tối đa (mặc định 60s)
-   * @param {number} options.intervalMs Chu kỳ kiểm tra lại (mặc định 3s)
+   * @param {number} options.timeoutMs Thời gian chờ tối đa (mặc định 90s)
+   * @param {number} options.intervalMs Chu kỳ kiểm tra lại (mặc định 2.5s)
    * @returns {Promise<{otpCode: string, message: object}>}
    */
-  async waitForOtpCode({ filterSender = "", filterSubject = "", timeoutMs = 60000, intervalMs = 3000 } = {}) {
+  async waitForOtpCode({ filterSender = "github", filterSubject = "", timeoutMs = 90000, intervalMs = 2500 } = {}) {
     const startTime = Date.now();
+    let pollCount = 0;
+    console.log(`📬 [Hotmail Graph API] Bắt đầu lắng nghe hộp thư đến cho ${this._email} (Timeout: ${Math.round(timeoutMs / 1000)}s)...`);
 
     while (Date.now() - startTime < timeoutMs) {
+      pollCount++;
+      const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+
       try {
-        const messages = await this.getInboxMessages(5);
+        const messages = await this.getInboxMessages(10);
+        if (pollCount % 2 === 1 || pollCount <= 3) {
+          const recentTitles = messages.slice(0, 2).map(m => `"${m.subject || 'Không tiêu đề'}" từ ${m.from?.emailAddress?.address || 'N/A'}`).join(" | ");
+          console.log(`   ⏳ [Hotmail Polling #${pollCount}] Quét ${messages.length} thư (đã chờ ${elapsedSec}s) -> Thư mới: [${recentTitles || 'Chưa có thư mới'}]`);
+        }
 
         for (const msg of messages) {
           const fromAddress = msg.from?.emailAddress?.address || "";
@@ -218,15 +228,16 @@ export class HotmailGraphClient {
           const preview = msg.bodyPreview || "";
           const bodyContent = msg.body?.content || "";
 
-          // Kiểm tra bộ lọc
+          // Kiểm tra bộ lọc người gửi hoặc tiêu đề GitHub
           const matchSender = !filterSender || fromAddress.toLowerCase().includes(filterSender.toLowerCase());
-          const matchSubject = !filterSubject || subject.toLowerCase().includes(filterSubject.toLowerCase());
+          const matchSubject = !filterSubject || subject.toLowerCase().includes(filterSubject.toLowerCase()) || subject.toLowerCase().includes("github") || subject.toLowerCase().includes("launch code");
 
-          if (matchSender && matchSubject) {
+          if (matchSender || matchSubject) {
             const fullText = `${subject} ${preview} ${bodyContent}`;
             const otp = this._extractOtpFromText(fullText);
 
             if (otp) {
+              console.log(`\n🎉 \x1b[32m[HOTMAIL OTP SUCCESS]\x1b[0m Đã nhận mã xác thực từ GitHub: [ \x1b[1m${otp}\x1b[0m ] (Từ: ${fromAddress})`);
               return {
                 otpCode: otp,
                 subject,
@@ -238,14 +249,13 @@ export class HotmailGraphClient {
           }
         }
       } catch (err) {
-        // Nếu lỗi tạm thời thì thử lại ở lượt sau
-        console.warn(`[HotmailGraphClient] Polling warning: ${err.message}`);
+        console.warn(`   ⚠️ [Hotmail Polling #${pollCount}] Lỗi kết nối Graph API: ${err.message} -> Thử lại ngay...`);
       }
 
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
 
-    throw new Error(`Timeout: Không nhận được mã OTP sau ${Math.round(timeoutMs / 1000)}s.`);
+    throw new Error(`Timeout: Không nhận được mã OTP từ GitHub sau ${Math.round(timeoutMs / 1000)}s.`);
   }
 
   // Getters

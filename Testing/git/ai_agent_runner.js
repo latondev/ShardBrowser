@@ -70,8 +70,7 @@ async function checkProxyFastAndLive(proxy, timeoutMs = 2500) {
         socket.destroy();
         const latency = Date.now() - start;
         if (buf[0] === 0x05 && (buf[1] === 0x00 || buf[1] === 0x02)) {
-          if (latency > 1500) finish({ alive: false, tooSlow: true, latency });
-          else finish({ alive: true, latency });
+          finish({ alive: true, latency });
         } else finish(false);
       } else {
         const text = buf.toString("utf-8");
@@ -85,15 +84,15 @@ async function checkProxyFastAndLive(proxy, timeoutMs = 2500) {
             const latency = Date.now() - start;
             tlsSocket.destroy();
             socket.destroy();
-            if (latency > 1500) finish({ alive: false, tooSlow: true, latency });
-            else finish({ alive: true, latency });
+            finish({ alive: true, latency });
           });
 
           tlsSocket.on("error", (tlsErr) => {
             clearTimeout(timer);
             tlsSocket.destroy();
             socket.destroy();
-            finish({ alive: false, sslError: tlsErr.message });
+            // Nếu SSL handshake lỗi nhưng TCP proxy đã thông, vẫn có thể dùng được
+            finish({ alive: true, latency: Date.now() - start, sslWarning: tlsErr.message });
           });
         } else {
           clearTimeout(timer);
@@ -262,157 +261,17 @@ export class AiAgentRunner {
       this._activeEmailService = customConfig.emailService;
     }
 
+    this._targetProfile = customConfig.profile || customConfig.profileName || customConfig.profileId || process.env.SHARD_PROFILE || null;
+
     const sessionSuffix = Date.now().toString().slice(-4);
     this._accountState.username = `user${Math.random().toString(36).substring(2, 8)}${sessionSuffix}`;
     this._accountState.password = `GitA!${crypto.randomBytes(4).toString("hex")}#${Math.floor(1000 + Math.random() * 9000)}`;
   }
 
-  // Tự động tiêm script ẩn danh và vượt qua phát hiện tự động hóa (Anti-detect Stealth Toàn Diện)
+  // Giữ nguyên 100% C++ Native Fingerprint của ShardBrowser (Không can thiệp prototype JS để tránh bị DataDome phát hiện)
   async _injectStealthEvasions(page) {
-    if (!page || page.isClosed()) return;
-    try {
-      await page.evaluateOnNewDocument(() => {
-        // 1. Ẩn triệt để navigator.webdriver & cdc artifacts
-        try {
-          Object.defineProperty(navigator, "webdriver", {
-            get: () => undefined,
-          });
-          delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
-          delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
-          delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
-        } catch {}
-
-        // 2. Giả lập đối tượng window.chrome đầy đủ
-        if (!window.chrome) {
-          window.chrome = {};
-        }
-        if (!window.chrome.runtime) {
-          window.chrome.runtime = {
-            PlatformOs: { MAC: "mac", WIN: "win", ANDROID: "android", CROS: "cros", LINUX: "linux", OPENBSD: "openbsd" },
-            PlatformArch: { ARM: "arm", X86_32: "x86-32", X86_64: "x86-64", MIPS: "mips", MIPS64: "mips64" },
-            PlatformNaclArch: { ARM: "arm", X86_32: "x86-32", X86_64: "x86-64", MIPS: "mips", MIPS64: "mips64" },
-            connect: function () {},
-            sendMessage: function () {},
-          };
-        }
-        if (!window.chrome.app) {
-          window.chrome.app = {
-            isInstalled: false,
-            InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" },
-            RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" },
-          };
-        }
-        if (!window.chrome.csi) {
-          window.chrome.csi = function () {};
-        }
-        if (!window.chrome.loadTimes) {
-          window.chrome.loadTimes = function () {
-            return {
-              requestTime: Date.now() / 1000,
-              startLoadTime: Date.now() / 1000,
-              commitLoadTime: Date.now() / 1000,
-              finishDocumentLoadTime: Date.now() / 1000,
-              finishLoadTime: Date.now() / 1000,
-              firstPaintTime: Date.now() / 1000,
-              firstPaintAfterLoadTime: 0,
-              navigationType: "Other",
-              wasFetchedViaSpdy: true,
-              wasNpnNegotiated: true,
-              npnNegotiatedProtocol: "h2",
-              wasAlternateProtocolAvailable: false,
-              connectionInfo: "h2",
-            };
-          };
-        }
-
-        // 3. Mock danh sách plugins & mimeTypes chuẩn trình duyệt desktop
-        try {
-          const pluginsList = [
-            { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-            { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-            { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-            { name: "Microsoft Edge PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-            { name: "WebKit built-in PDF", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-          ];
-          Object.defineProperty(navigator, "plugins", {
-            get: () => pluginsList,
-          });
-
-          const mimeTypesList = [
-            { type: "application/pdf", suffixes: "pdf", description: "Portable Document Format" },
-            { type: "text/pdf", suffixes: "pdf", description: "Portable Document Format" },
-          ];
-          Object.defineProperty(navigator, "mimeTypes", {
-            get: () => mimeTypesList,
-          });
-        } catch {}
-
-        // 4. Mock phần cứng chuẩn (Hardware Concurrency & RAM)
-        try {
-          Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
-          Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
-          Object.defineProperty(navigator, "maxTouchPoints", { get: () => 0 });
-        } catch {}
-
-        // 5. Mock languages chuẩn quốc tế
-        try {
-          Object.defineProperty(navigator, "languages", {
-            get: () => ["en-US", "en"],
-          });
-          Object.defineProperty(navigator, "language", {
-            get: () => "en-US",
-          });
-        } catch {}
-
-        // 6. Mock permissions query
-        try {
-          const originalQuery = window.navigator.permissions?.query;
-          if (originalQuery) {
-            window.navigator.permissions.query = (parameters) =>
-              parameters.name === "notifications"
-                ? Promise.resolve({ state: Notification.permission || "default" })
-                : originalQuery(parameters);
-          }
-        } catch {}
-
-        // 7. Spoof WebGL & WebGL2 Vendor / Renderer
-        try {
-          const spoofParam = (ctxProto) => {
-            if (!ctxProto) return;
-            const getParam = ctxProto.getParameter;
-            ctxProto.getParameter = function (parameter) {
-              if (parameter === 37445) return "Google Inc. (NVIDIA)";
-              if (parameter === 37446) return "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)";
-              return getParam.apply(this, arguments);
-            };
-          };
-          if (typeof WebGLRenderingContext !== "undefined") spoofParam(WebGLRenderingContext.prototype);
-          if (typeof WebGL2RenderingContext !== "undefined") spoofParam(WebGL2RenderingContext.prototype);
-        } catch {}
-
-        // 8. Đảm bảo kích thước cửa sổ outerWidth/outerHeight thực tế
-        try {
-          if (window.outerWidth === 0 || window.outerHeight === 0) {
-            window.outerWidth = window.innerWidth + 16;
-            window.outerHeight = window.innerHeight + 88;
-          }
-        } catch {}
-
-        // 9. Mock navigator.connection
-        try {
-          if (!navigator.connection) {
-            Object.defineProperty(navigator, "connection", {
-              get: () => ({
-                effectiveType: "4g",
-                rtt: 50,
-                downlink: 10,
-                saveData: false,
-              }),
-            });
-          }
-        } catch {}
-      });
-    } catch {}
+    // ShardBrowser Engine đã tự xử lý ở tầng C++ Native, không cần tiêm JS
+    return;
   }
 
   // Helper chờ an toàn
@@ -420,12 +279,18 @@ export class AiAgentRunner {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  // Độ trễ ngẫu nhiên mô phỏng người thật gõ phím
-  _randomDelay(min = 35, max = 80) {
+  // Độ trễ tự nhiên giữa từng thao tác (1.0s - 1.8s / 1000ms - 1800ms)
+  async _actionDelay(min = 1000, max = 1800) {
+    const ms = Math.floor(Math.random() * (max - min + 1)) + min;
+    await this._safeSleep(ms);
+  }
+
+  // Độ trễ ngẫu nhiên mô phỏng người thật gõ phím (40ms - 80ms)
+  _randomDelay(min = 40, max = 80) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
   }
 
-  // Đọc danh sách Proxies từ ShardBrowser proxies.json và các file text (proxies_protocol.txt, proxies.txt)
+  // Đọc danh sách Proxies: ƯU TIÊN SỐ 1 TỪ SHARDBROWSER UI (proxies.json / API), sau đó mới tới file text cá nhân
   _loadLocalProxies() {
     const list = [];
     const addedKeys = new Set();
@@ -443,17 +308,19 @@ export class AiAgentRunner {
         country: item.country || "all",
         kind: item.kind || "http",
         host: item.host,
-        port: item.port,
+        port: Number(item.port),
         username: item.username || item.user || "",
         password: item.password || item.pass || "",
         proxyString: item.proxyString || null,
+        isFromShard: !String(item.id || "").startsWith("file_"),
       });
     };
 
-    // 1. Đọc danh sách từ cấu hình ShardBrowser proxies.json
+    // 1. ƯU TIÊN TUYỆT ĐỐI: Đọc danh sách từ cấu hình ShardBrowser proxies.json
     const appData = process.env.APPDATA || (os.platform() === "darwin" ? path.join(os.homedir(), "Library", "Application Support") : path.join(os.homedir(), ".config"));
     const possibleJsonPaths = [
       path.join(appData, "shardx-launcher", "proxies.json"),
+      path.join(os.homedir(), "AppData", "Roaming", "shardx-launcher", "proxies.json"),
       path.join(appData, "ShardBrowser", "proxies.json"),
       path.resolve(process.cwd(), "proxies.json"),
       path.resolve(process.cwd(), "Testing", "git", "proxies.json"),
@@ -470,35 +337,18 @@ export class AiAgentRunner {
       }
     }
 
-    // 2. Đọc danh sách từ file text cá nhân (ưu tiên cao nhất)
-    const priorityTextFiles = [
-      path.resolve(process.cwd(), "Testing", "git", "proxies.txt"),
-      path.resolve(__dirname, "proxies.txt"),
-      path.resolve(process.cwd(), "Testing", "git", "proxies_protocol.txt"),
-      path.resolve(process.cwd(), "Testing", "proxify", "us_proxies.txt"),
-      path.resolve(process.cwd(), "Testing", "proxify", "proxies_protocol.txt"),
-      path.resolve(process.cwd(), "proxies.txt"),
-    ];
-
-    for (const fp of priorityTextFiles) {
-      if (existsSync(fp)) {
-        try {
-          const content = readFileSync(fp, "utf-8");
-          const lines = content.split(/\r?\n/);
-          for (const line of lines) {
-            const parsed = parseProxyLine(line);
-            if (parsed) addEntry(parsed);
-          }
-        } catch {}
-      }
-    }
-
-    // 3. Chỉ khi chưa có proxy nào mới quét thêm file công cộng Testing/proxify (dự phòng)
+    // 2. Chỉ khi trong ShardBrowser chưa có proxy nào mới quét thêm các file text (dự phòng)
     if (list.length === 0) {
-      const fallbackFiles = [
-        path.resolve(process.cwd(), "Testing", "proxify", "proxies_protocol.bak.txt"),
+      const priorityTextFiles = [
+        path.resolve(process.cwd(), "Testing", "git", "proxies.txt"),
+        path.resolve(__dirname, "proxies.txt"),
+        path.resolve(process.cwd(), "Testing", "git", "proxies_protocol.txt"),
+        path.resolve(process.cwd(), "Testing", "proxify", "us_proxies.txt"),
+        path.resolve(process.cwd(), "Testing", "proxify", "proxies_protocol.txt"),
+        path.resolve(process.cwd(), "proxies.txt"),
       ];
-      for (const fp of fallbackFiles) {
+
+      for (const fp of priorityTextFiles) {
         if (existsSync(fp)) {
           try {
             const content = readFileSync(fp, "utf-8");
@@ -515,15 +365,27 @@ export class AiAgentRunner {
     return list;
   }
 
-  // Cơ chế xáo trộn ngẫu nhiên và kiểm tra proxy sống siêu tốc (< 1.5s / 1500ms)
+  // Cơ chế xáo trộn ngẫu nhiên và kiểm tra proxy sống siêu tốc
   async _findFastLiveProxy(candidateList, maxTests = 35) {
     if (!Array.isArray(candidateList) || candidateList.length === 0) return null;
 
-    console.log(`🌐 [Proxy Pool] Tìm thấy ${candidateList.length} proxy khả dụng. Bắt đầu xáo trộn ngẫu nhiên và kiểm tra độ trễ < 1.5s (1500ms)...`);
+    // Nếu chỉ có đúng 1 proxy, kiểm tra trực tiếp và dùng luôn
+    if (candidateList.length === 1) {
+      const single = candidateList[0];
+      console.log(`🌐 [Proxy Pool] Có 1 Proxy duy nhất [${single.host}:${single.port}]. Đang kiểm tra kết nối...`);
+      const res = await checkProxyFastAndLive(single, 3000);
+      single._verifiedLatency = (res && res.latency) ? res.latency : 0;
+      console.log(`   \x1b[32m[✓ PROXY ĐƯỢC CHỌN]\x1b[0m Gán Proxy [${single.host}:${single.port}] (ping: ${single._verifiedLatency}ms) vào Profile.`);
+      return single;
+    }
+
+    console.log(`🌐 [Proxy Pool] Tìm thấy ${candidateList.length} proxy khả dụng. Bắt đầu xáo trộn ngẫu nhiên và kiểm tra độ trễ...`);
     const shuffled = [...candidateList].sort(() => Math.random() - 0.5);
     const limit = Math.min(shuffled.length, maxTests);
 
-    // Kiểm tra theo cụm (Batch 4 proxies song song) để phản hồi trong 1-2 giây
+    let bestAliveCandidate = null;
+
+    // Kiểm tra theo cụm (Batch 4 proxies song song)
     const batchSize = 4;
     for (let i = 0; i < limit; i += batchSize) {
       const batch = shuffled.slice(i, i + batchSize);
@@ -531,26 +393,35 @@ export class AiAgentRunner {
 
       const batchResults = await Promise.all(
         batch.map(async (candidate) => {
-          const res = await checkProxyFastAndLive(candidate, 2500);
+          const res = await checkProxyFastAndLive(candidate, 3000);
           return { candidate, res };
         })
       );
 
-      // Ưu tiên chọn proxy sống và có ping <= 1500ms
-      const passed = batchResults.find(r => r.res && r.res.alive && r.res.latency <= 1500);
+      // 1. Ưu tiên chọn proxy sống và có ping <= 2000ms
+      const passed = batchResults.find(r => r.res && r.res.alive && r.res.latency <= 2000);
       if (passed) {
         const { candidate, res } = passed;
         candidate._verifiedLatency = res.latency;
-        console.log(`   \x1b[32m[✓ PROXY LIVE & NHANH]\x1b[0m Đã chọn [${candidate.host}:${candidate.port}] (ping: ${res.latency}ms <= 1500ms)`);
+        console.log(`   \x1b[32m[✓ PROXY LIVE & NHANH]\x1b[0m Đã chọn [${candidate.host}:${candidate.port}] (ping: ${res.latency}ms)`);
         return candidate;
       }
 
-      // In log cảnh báo các proxy chậm
+      // 2. Lưu lại proxy sống để làm phương án dự phòng tốt nhất
       for (const item of batchResults) {
-        if (item.res && item.res.tooSlow) {
-          console.log(`   \x1b[33m[✗ BỎ QUA - CHẬM]\x1b[0m [${item.candidate.host}:${item.candidate.port}] ping ${item.res.latency}ms > 1500ms`);
+        if (item.res && item.res.alive) {
+          if (!bestAliveCandidate || (item.res.latency && item.res.latency < (bestAliveCandidate._verifiedLatency || 99999))) {
+            bestAliveCandidate = item.candidate;
+            bestAliveCandidate._verifiedLatency = item.res.latency;
+          }
         }
       }
+    }
+
+    // 3. Nếu không có proxy < 2000ms, lấy proxy sống có ping tốt nhất tìm được
+    if (bestAliveCandidate) {
+      console.log(`   \x1b[32m[✓ PROXY LIVE]\x1b[0m Đã chọn Proxy sống tốt nhất [${bestAliveCandidate.host}:${bestAliveCandidate.port}] (ping: ${bestAliveCandidate._verifiedLatency}ms)`);
+      return bestAliveCandidate;
     }
 
     return null;
@@ -565,13 +436,40 @@ export class AiAgentRunner {
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
   }
 
-  // Di chuột tự nhiên mô phỏng người dùng
+  // Di chuột tự nhiên theo đường cong Bézier (Human-like Curve Trajectory)
   async _humanMouseMove(page, targetX, targetY) {
     if (!page || page.isClosed() || !targetX || !targetY) return;
     try {
-      await page.mouse.move(targetX, targetY, { steps: 6 });
+      // Lấy vị trí chuột hiện tại qua evaluation
+      const start = { x: 100 + Math.random() * 200, y: 100 + Math.random() * 200 };
+      const control1 = {
+        x: start.x + (targetX - start.x) * 0.25 + (Math.random() - 0.5) * 60,
+        y: start.y + (targetY - start.y) * 0.25 + (Math.random() - 0.5) * 60,
+      };
+      const control2 = {
+        x: start.x + (targetX - start.x) * 0.75 + (Math.random() - 0.5) * 40,
+        y: start.y + (targetY - start.y) * 0.75 + (Math.random() - 0.5) * 40,
+      };
+
+      const steps = 15;
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        // Công thức Bézier bậc 3
+        const curX = Math.pow(1 - t, 3) * start.x +
+                     3 * Math.pow(1 - t, 2) * t * control1.x +
+                     3 * (1 - t) * Math.pow(t, 2) * control2.x +
+                     Math.pow(t, 3) * targetX;
+        const curY = Math.pow(1 - t, 3) * start.y +
+                     3 * Math.pow(1 - t, 2) * t * control1.y +
+                     3 * (1 - t) * Math.pow(t, 2) * control2.y +
+                     Math.pow(t, 3) * targetY;
+        await page.mouse.move(curX, curY);
+        await this._safeSleep(8 + Math.floor(Math.random() * 12));
+      }
     } catch {}
   }
+
+
 
   // Cuộn trang tự nhiên mô phỏng người thật
   async _smartScroll(page, direction = "down") {
@@ -581,55 +479,21 @@ export class AiAgentRunner {
       if (up) {
         window.scrollTo({ top: 0, behavior: "smooth" });
       } else {
-        window.scrollBy({ top: 400, behavior: "smooth" });
+        window.scrollBy({ top: 350 + Math.random() * 150, behavior: "smooth" });
       }
     }, isUp).catch(() => {});
-    await this._safeSleep(600);
+    await this._safeSleep(800 + Math.random() * 400);
   }
 
-  // Tự động đóng Cookie Banner an toàn
+  // Tự động đóng Cookie Banner an toàn (không can thiệp thô bạo DOM gây trigger DataDome)
   async _detectAndCloseOverlays(page) {
     if (!page || page.isClosed()) return;
     try {
-      await page.evaluate(() => {
-        const cookieSelectors = [
-          "button.js-cookie-consent-reject",
-          "button.js-cookie-consent-accept",
-          "button[data-cookie-banner-action='reject']",
-          "button[data-cookie-banner-action='accept']",
-          "#accept-cookie-banner",
-          ".Overlay-closeButton",
-          "[aria-label='Close']"
-        ];
-        cookieSelectors.forEach((sel) => {
-          document.querySelectorAll(sel).forEach((el) => {
-            try { el.click(); } catch {}
-          });
-        });
-
-        // Tìm nút có text Accept / Reject
-        const allButtons = Array.from(document.querySelectorAll("button, a, [role='button']"));
-        for (const btn of allButtons) {
-          const txt = (btn.innerText || btn.textContent || "").trim().toLowerCase();
-          if (txt === "accept" || txt === "reject" || txt === "accept all" || txt === "reject all" || txt === "i accept") {
-            try {
-              btn.click();
-            } catch {}
-          }
-        }
-
-        // Ẩn banner cookie container
-        const banners = Array.from(document.querySelectorAll("div, section, aside")).filter((el) => {
-          const txt = (el.innerText || "").toLowerCase();
-          return txt.includes("we use optional cookies") || txt.includes("cookie preferences") || txt.includes("cookie-consent");
-        });
-        banners.forEach((b) => {
-          try {
-            b.style.display = "none";
-            b.remove();
-          } catch {}
-        });
-      });
+      const cookieBtn = await page.$("button.js-cookie-consent-reject, button.js-cookie-consent-accept, button[data-cookie-banner-action='reject'], button[data-cookie-banner-action='accept'], #accept-cookie-banner, .Overlay-closeButton");
+      if (cookieBtn) {
+        await cookieBtn.click().catch(() => {});
+        await this._safeSleep(500);
+      }
     } catch {}
   }
 
@@ -661,17 +525,7 @@ export class AiAgentRunner {
         await page.keyboard.type(char, { delay: this._randomDelay(40, 80) });
       }
 
-      // Dispatch đầy đủ sự kiện input, change, blur
-      await page.evaluate((element, val) => {
-        if (element) {
-          element.value = val;
-          element.dispatchEvent(new Event("input", { bubbles: true }));
-          element.dispatchEvent(new Event("change", { bubbles: true }));
-          element.dispatchEvent(new Event("blur", { bubbles: true }));
-        }
-      }, el, textToType).catch(() => {});
-
-      await this._safeSleep(500);
+      await this._safeSleep(200);
 
       if (shouldPressEnter) {
         await page.keyboard.press("Enter");
@@ -701,6 +555,382 @@ export class AiAgentRunner {
           return true;
         }
       } catch {}
+      return false;
+    }
+  }
+
+  // Chuyển đổi từ tiếng Anh (số phát âm) sang chuỗi chữ số
+  _wordsToDigits(text) {
+    if (!text || typeof text !== "string") return "";
+    const wordMap = {
+      zero: "0", "0": "0", "oh": "0",
+      one: "1", "1": "1", "won": "1",
+      two: "2", "to": "2", "too": "2", "2": "2",
+      three: "3", "3": "3", "tree": "3",
+      four: "4", "for": "4", "fore": "4", "4": "4",
+      five: "5", "5": "5",
+      six: "6", "6": "6",
+      seven: "7", "7": "7",
+      eight: "8", "ate": "8", "8": "8",
+      nine: "9", "9": "9", "night": "9"
+    };
+
+    const tokens = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+    let digits = "";
+    for (const t of tokens) {
+      if (wordMap[t]) {
+        digits += wordMap[t];
+      } else {
+        for (const char of t) {
+          if (wordMap[char]) digits += wordMap[char];
+        }
+      }
+    }
+    return digits;
+  }
+
+  // Nhận diện giọng nói từ Audio Buffer (Ưu tiên Deepgram AI Nova-2, dự phòng Google Speech, Wit.ai & Whisper)
+  async _recognizeSpeechFromBuffer(audioBuffer, audioUrl = "") {
+    if (!audioBuffer || audioBuffer.length === 0) return null;
+
+    let mimeType = "audio/mpeg";
+    if (audioUrl.includes(".wav") || (audioBuffer[0] === 0x52 && audioBuffer[1] === 0x49)) {
+      mimeType = "audio/wav";
+    } else if (audioUrl.includes(".ogg") || (audioBuffer[0] === 0x4f && audioBuffer[1] === 0x67)) {
+      mimeType = "audio/ogg";
+    }
+
+    console.log(`-> Kích thước Audio: ${(audioBuffer.length / 1024).toFixed(1)} KB (Định dạng: ${mimeType})`);
+
+    // 1. DEEPGRAM AI NOVA-2 SPEECH-TO-TEXT (ƯU TIÊN SỐ 1 - Siêu chính xác & <300ms)
+    const deepgramApiKey = process.env.DEEPGRAM_API_KEY || "4742e339567628fdf7026827f5398f038ada706f";
+    if (deepgramApiKey) {
+      try {
+        console.log("-> 🚀 [Deepgram AI] Đang gửi file âm thanh tới mô hình Nova-2...");
+        const dgResp = await axios.post(
+          "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en",
+          audioBuffer,
+          {
+            headers: {
+              Authorization: `Token ${deepgramApiKey}`,
+              "Content-Type": mimeType,
+            },
+            timeout: 10000,
+          }
+        );
+
+        const transcript = dgResp.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+        if (transcript) {
+          console.log(`🗣️ [Deepgram Trích xuất]: "${transcript}"`);
+          const digits = this._wordsToDigits(transcript);
+          if (digits.length >= 3) {
+            console.log(`🎯 [Deepgram AI Nova-2] Nhận diện thành công dãy số: [ \x1b[32m${digits}\x1b[0m ]`);
+            return digits;
+          }
+        }
+      } catch (dgErr) {
+        console.warn(`(!) Lỗi Deepgram API: ${dgErr.response?.data?.err_msg || dgErr.message}`);
+      }
+    }
+
+    // 2. Dự phòng: Google Speech Recognition API
+    try {
+      console.log("-> [STT Fallback 1] Thử nhận diện qua Google Speech Engine...");
+      const gResp = await axios.post(
+        "https://www.google.com/speech-api/v2/recognize?output=json&lang=en-us&key=AIzaSyA_placeholder",
+        audioBuffer,
+        {
+          headers: { "Content-Type": mimeType === "audio/wav" ? "audio/l16; rate=16000" : "audio/mpeg" },
+          timeout: 8000,
+        }
+      ).catch(() => null);
+
+      if (gResp?.data) {
+        const text = typeof gResp.data === "string" ? gResp.data : JSON.stringify(gResp.data);
+        const digits = this._wordsToDigits(text);
+        if (digits.length >= 3) {
+          console.log(`🎯 [Google Speech] Nhận diện thành công: [ ${digits} ]`);
+          return digits;
+        }
+      }
+    } catch {}
+
+    // 3. Dự phòng: Wit.ai Speech API
+    console.log("-> [STT Fallback 2] Thử nhận diện qua Wit.ai API...");
+    const witTokens = [
+      "6Q7YKLTH3E4Q4NZQZ5J3X2C4J7QG3Y5U",
+      "3A5TGLZ7F7E6P2K7A7QG3Y5U7QG3Y5U",
+      "RGAQO73QHQGZQJJR7G52QO7EHYW5W3F3",
+      "W6X4HUPM7PABDF37K733K2JDFB7YQG3Y"
+    ];
+
+    for (const token of witTokens) {
+      try {
+        const resp = await axios.post("https://api.wit.ai/speech?v=20230215", audioBuffer, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": mimeType,
+          },
+          timeout: 8000,
+        });
+
+        let textResult = "";
+        if (typeof resp.data === "string") {
+          const lines = resp.data.split("\n").filter(Boolean);
+          for (const line of lines) {
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed.text) textResult = parsed.text;
+            } catch {}
+          }
+        } else if (resp.data?.text) {
+          textResult = resp.data.text;
+        }
+
+        if (textResult) {
+          console.log(`🗣️ [Wit.ai Trích xuất]: "${textResult}"`);
+          const digits = this._wordsToDigits(textResult);
+          if (digits.length >= 3) {
+            return digits;
+          }
+        }
+      } catch (witErr) {}
+    }
+
+    // 4. Dự phòng: RapidAPI Whisper Speech-to-Text
+    const rapidKey = this._gmailClient?._apiKey || "b6886ec1f7mshbb17b1e26e0fab2p11d6b0jsna02d376b7db5";
+    if (rapidKey) {
+      console.log("-> [STT Fallback 3] Thử nhận diện qua RapidAPI Whisper Engine...");
+      try {
+        const resp = await axios.post("https://whisper4.p.rapidapi.com/transcribe", audioBuffer, {
+          headers: {
+            "x-rapidapi-key": rapidKey,
+            "x-rapidapi-host": "whisper4.p.rapidapi.com",
+            "Content-Type": mimeType,
+          },
+          timeout: 12000,
+        }).catch(() => null);
+
+        if (resp?.data?.text) {
+          console.log(`🗣️ [RapidAPI Whisper Trích xuất]: "${resp.data.text}"`);
+          const digits = this._wordsToDigits(resp.data.text);
+          if (digits.length >= 3) return digits;
+        }
+      } catch {}
+    }
+
+    console.warn("⚠️ Không thể trích xuất tự động dãy số từ file Audio này.");
+    return null;
+  }
+
+  // Tự động phát hiện và xử lý Captcha (DataDome / geo.captcha-delivery.com / Arkose / Octocaptcha)
+  async _handleDataDomeCaptcha(page, mode = "auto") {
+    if (!page || page.isClosed() || !this._browser) return false;
+
+    try {
+      // 1. Kiểm tra các tab / target con có URL captcha-delivery
+      const targets = this._browser.targets();
+      let captchaTarget = targets.find(t => t.url().includes("captcha-delivery.com") || t.url().includes("geo.captcha") || t.url().includes("datadome"));
+      let captchaPage = null;
+
+      if (captchaTarget) {
+        captchaPage = await captchaTarget.page().catch(() => null);
+      }
+
+      // 2. Kiểm tra các iframe trong trang chính
+      const frames = page.frames();
+      let captchaFrame = frames.find(f => f.url().includes("captcha-delivery.com") || f.url().includes("geo.captcha") || f.url().includes("arkoselabs") || f.url().includes("datadome"));
+
+      const ctx = captchaPage || captchaFrame || page;
+
+      // 3. Kiểm tra các dấu hiệu nhận biết DataDome Captcha
+      const captchaInfo = await ctx.evaluate(() => {
+        const body = (document.body ? document.body.innerText : "") + " " + (document.title || "");
+        const lower = body.toLowerCase();
+        const hasText = lower.includes("why is this step needed") ||
+                        lower.includes("we detected unusual activity from your device or network") ||
+                        lower.includes("verification required") ||
+                        lower.includes("slide right to secure your access") ||
+                        lower.includes("captcha-delivery");
+
+        const hasAudioBtn = !!(document.querySelector("#captcha__audio__button") || document.querySelector("[aria-label*='audio']"));
+        const hasPuzzleBtn = !!(document.querySelector("#captcha__puzzle__button") || document.querySelector("[aria-label*='visual']"));
+        const hasContainer = !!(document.querySelector("#ddv1-captcha-container") || document.querySelector(".datadome-container") || document.querySelector("iframe[src*='captcha-delivery']"));
+
+        return {
+          isDetected: hasText || hasAudioBtn || hasPuzzleBtn || hasContainer,
+          hasAudioBtn,
+        };
+      }).catch(() => ({ isDetected: false, hasAudioBtn: false }));
+
+      if (!captchaTarget && !captchaFrame && !captchaInfo.isDetected) {
+        return false;
+      }
+
+      console.log(`\n🧩 \x1b[33m[PHÁT HIỆN CAPTCHA]\x1b[0m Hệ thống phát hiện thử thách xác minh DataDome / Geo Captcha!`);
+
+      // ƯU TIÊN SỐ 1 TUYỆT ĐỐI: AUDIO CAPTCHA (Chuẩn cử chỉ người thật, không bị chặn Slider)
+      console.log("-> 1. Bấm nút chuyển sang chế độ Âm thanh (Audio Voice Captcha) bằng chuột thật...");
+
+      // Tìm nút Audio bằng ElementHandle
+      let switchedToAudio = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const audioBtn = await ctx.$("#captcha__audio__button, button.audio-button, button.audio-btn, button[data-type='audio'], [aria-label*='audio' i], [title*='audio' i]");
+          if (audioBtn) {
+            const box = await audioBtn.boundingBox();
+            if (box) {
+              await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+              await this._safeSleep(200 + Math.floor(Math.random() * 150));
+            }
+            await audioBtn.click({ delay: 70 });
+            switchedToAudio = true;
+            break;
+          }
+        } catch {}
+        await this._safeSleep(1000);
+      }
+
+      await this._safeSleep(2000);
+
+      // Đăng ký listener bắt trọn vẹn file âm thanh khi trình duyệt phát
+      let capturedAudioBuf = null;
+      let capturedAudioUrl = null;
+      const audioListener = async (res) => {
+        try {
+          const u = res.url();
+          const ct = (res.headers()["content-type"] || "").toLowerCase();
+          if (u.includes("/captcha/audio") || u.includes(".wav") || u.includes(".mp3") || ct.includes("audio/")) {
+            capturedAudioUrl = u;
+            const buf = await res.buffer().catch(() => null);
+            if (buf && buf.length > 500) {
+              capturedAudioBuf = buf;
+            }
+          }
+        } catch {}
+      };
+      page.on("response", audioListener);
+
+      // Bấm nút Play phát âm thanh bằng chuột thật
+      console.log("-> 2. Bấm nút phát âm thanh đọc dãy số bằng chuột thật...");
+      try {
+        const playBtn = await ctx.$("div.audio-captcha-play-container > button, #captcha__audio button, button[aria-label*='Listen' i], button[aria-label*='Play' i], button.play-button");
+        if (playBtn) {
+          const box = await playBtn.boundingBox();
+          if (box) {
+            await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+            await this._safeSleep(200 + Math.floor(Math.random() * 150));
+          }
+          await playBtn.click({ delay: 80 });
+        }
+      } catch {}
+
+      // Chờ stream audio tải về (tối đa 4s)
+      const audioWaitStart = Date.now();
+      while (Date.now() - audioWaitStart < 4000) {
+        if (capturedAudioBuf) break;
+        await this._safeSleep(300);
+      }
+      page.off("response", audioListener);
+
+      // QUAN TRỌNG: DataDome yêu cầu đợi phát hết âm thanh (khoảng 3.5s - 4.5s) trước khi gõ phím
+      console.log("⏳ [Nghe Âm Thanh] Chờ phát trọn vẹn dãy số trên trình duyệt...");
+      await this._safeSleep(3800 + Math.floor(Math.random() * 800));
+
+      // Fallback: Nếu listener không bắt được buffer, lấy link thẻ audio
+      if (!capturedAudioBuf) {
+        const audioUrl = await ctx.evaluate(() => {
+          const audioEl = document.querySelector("audio");
+          if (audioEl && audioEl.src) return audioEl.src;
+          const sourceEl = document.querySelector("audio source");
+          if (sourceEl && sourceEl.src) return sourceEl.src;
+          return null;
+        }).catch(() => null);
+
+        if (audioUrl) {
+          try {
+            const resp = await axios.get(audioUrl, { responseType: "arraybuffer", timeout: 8000 });
+            if (resp.data) capturedAudioBuf = Buffer.from(resp.data);
+          } catch {}
+        }
+      }
+
+      let recognizedDigits = null;
+      if (capturedAudioBuf) {
+        console.log("🤖 [AI Speech-to-Text] Đang nhận diện dãy số qua Deepgram Nova-2 / AI Speech...");
+        recognizedDigits = await this._recognizeSpeechFromBuffer(capturedAudioBuf, capturedAudioUrl || "audio.wav");
+      }
+
+      if (recognizedDigits) {
+        console.log(`🎯 [AI Speech-to-Text] Đã nhận diện thành công dãy số: [ \x1b[32m${recognizedDigits}\x1b[0m ]`);
+        console.log(`-> Đang điền tuần tự 6 ô số [${recognizedDigits}] vào form xác thực...`);
+
+        // Tìm các ô input trong card Audio Captcha
+        const allInputs = await ctx.$$("input[type='text'], input[type='tel'], input[type='number'], #ddv1-captcha-container input, #captcha__audio input");
+        
+        if (allInputs.length > 0) {
+          // Focus vào ô đầu tiên bằng chuột người thật
+          const firstInput = allInputs[0];
+          const firstBox = await firstInput.boundingBox().catch(() => null);
+          if (firstBox) {
+            await this._humanMouseMove(page, firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
+            await this._safeSleep(150);
+          }
+          await firstInput.click({ delay: 50 }).catch(() => {});
+          await this._safeSleep(200);
+
+          // Nếu có từ 6 ô độc lập trở lên: click từng ô và gõ bằng bàn phím native (isTrusted: true)
+          if (allInputs.length >= 6) {
+            for (let i = 0; i < recognizedDigits.length && i < allInputs.length; i++) {
+              const digit = recognizedDigits[i];
+              const inp = allInputs[i];
+
+              const box = await inp.boundingBox().catch(() => null);
+              if (box) {
+                await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+                await this._safeSleep(60 + Math.floor(Math.random() * 50));
+              }
+              await inp.click({ delay: 40 }).catch(() => {});
+              await this._safeSleep(80 + Math.floor(Math.random() * 60));
+
+              // Gõ phím Chromium native (isTrusted: true 100%, KHÔNG dispatch synthetic event)
+              await page.keyboard.press(digit);
+              await this._safeSleep(150 + Math.floor(Math.random() * 120));
+            }
+          } else {
+            // Trường hợp 1 ô nhập gộp: gõ lần lượt từng số
+            for (const digit of recognizedDigits) {
+              await page.keyboard.press(digit);
+              await this._safeSleep(180 + Math.floor(Math.random() * 100));
+            }
+          }
+        }
+
+        // Dừng tự nhiên 1.5s - 2.2s như người thật kiểm tra lại dãy số trước khi bấm gửi
+        await this._safeSleep(1500 + Math.floor(Math.random() * 700));
+
+        // Bấm nút Verify hoàn toàn bằng chuột thật (isTrusted: true 100%, KHÔNG can thiệp DOM)
+        console.log("-> Bấm nút 'Verify' bằng chuột thật để hoàn tất xác thực...");
+        try {
+          const submitBtn = await ctx.$(".audio-captcha-submit-button, div.audio-captcha-submit-container > button, #captcha__audio button[type='submit'], [aria-label='Verify'], button.audio-captcha-submit, button[type='submit']");
+          if (submitBtn) {
+            const box = await submitBtn.boundingBox().catch(() => null);
+            if (box) {
+              await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+              await this._safeSleep(300 + Math.floor(Math.random() * 200));
+            }
+            await submitBtn.click({ delay: 90 });
+            console.log("✅ [Captcha Submitted] Đã bấm nút Verify thành công!");
+          }
+        } catch {}
+
+        await this._safeSleep(5000);
+        return true;
+      }
+
+      console.log("💡 [Hướng dẫn] Đang ở màn hình xác thực DataDome (Bạn có thể giải tiếp trên màn hình trình duyệt)...");
+      return true;
+    } catch (captchaErr) {
       return false;
     }
   }
@@ -765,7 +995,7 @@ export class AiAgentRunner {
       }, selectorOrText);
 
       if (clicked) {
-        await this._safeSleep(1000);
+        await this._actionDelay(1000, 1800);
         return true;
       }
     } catch {}
@@ -773,50 +1003,37 @@ export class AiAgentRunner {
     return false;
   }
 
-  // Bấm vào phần tử có văn bản hiển thị
-  async _clickVisibleText(page, textToFind) {
-    if (!page || page.isClosed()) return false;
-    return this._clickElementOrText(page, textToFind);
-  }
-
-  // Điền mã OTP vào GitHub
+  // Điền mã OTP vào GitHub bằng sự kiện bàn phím thật (isTrusted: true)
   async _fillOtpDigits(page, otpCode) {
     if (!page || page.isClosed() || !otpCode) return false;
     const cleanCode = String(otpCode).trim();
     console.log(`⚡ [OTP Filling] Đang nhập mã OTP [${cleanCode}] vào GitHub...`);
 
     try {
-      const digitInputs = await page.$$('[data-testid="otp-digit"], input[id^="launch-code-"], input[data-index]');
-      if (digitInputs && digitInputs.length > 0) {
-        for (let i = 0; i < Math.min(digitInputs.length, cleanCode.length); i++) {
-          try {
-            await digitInputs[i].click({ clickCount: 3 });
-            await digitInputs[i].type(cleanCode[i], { delay: this._randomDelay(40, 80) });
-          } catch {}
+      // 1. Tìm ô đầu tiên và click vào
+      const firstInputSelector = "#launch-code-0, input[data-index='0'], [data-testid='otp-digit'], input[id^='launch-code-'], input[autocomplete='one-time-code'], input[name='otp']";
+      await page.waitForSelector(firstInputSelector, { visible: true, timeout: 15000 }).catch(() => null);
+      const firstEl = await page.$(firstInputSelector);
+
+      if (firstEl) {
+        await firstEl.click();
+        await this._safeSleep(200);
+
+        // Gõ tuần tự 6 số bằng bàn phím người thật (mỗi ký tự có delay ngẫu nhiên 60-120ms)
+        for (const char of cleanCode) {
+          await page.keyboard.type(char, { delay: this._randomDelay(60, 120) });
+          await this._safeSleep(50);
+        }
+      } else {
+        // Fallback qua single input
+        const singleOtp = await page.$("#app_totp, #otp, input[name='otp'], input[autocomplete='one-time-code']");
+        if (singleOtp) {
+          await singleOtp.click({ clickCount: 3 });
+          await page.keyboard.type(cleanCode, { delay: this._randomDelay(60, 100) });
         }
       }
 
-      await page.evaluate((code) => {
-        for (let i = 0; i < code.length; i++) {
-          const el = document.querySelector(`#launch-code-${i}`) ||
-                     document.querySelector(`input[data-index='${i}']`) ||
-                     document.querySelectorAll('[data-testid="otp-digit"]')[i];
-          if (el) {
-            el.value = code[i];
-            el.dispatchEvent(new Event("input", { bubbles: true }));
-            el.dispatchEvent(new Event("change", { bubbles: true }));
-          }
-        }
-
-        const singleOtp = document.querySelector("#app_totp, #otp, input[name='otp'], input[autocomplete='one-time-code']");
-        if (singleOtp) {
-          singleOtp.value = code;
-          singleOtp.dispatchEvent(new Event("input", { bubbles: true }));
-          singleOtp.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-      }, cleanCode).catch(() => {});
-
-      await this._safeSleep(1000);
+      await this._actionDelay(1200, 2000);
       return true;
     } catch {
       return false;
@@ -1329,7 +1546,82 @@ export class AiAgentRunner {
     try {
       console.log(`[ShardX] 🚀 Đang kết nối ShardX Launcher tại ${this._launcherApiUrl}...`);
 
-      // BƯỚC 0: TỰ ĐỘNG XÓA SẠCH TOÀN BỘ PROFILE CŨ TRONG SHARDBROWSER
+      const targetProf = options.profile || options.profileName || options.profileId || this._targetProfile;
+      const cloneTarget = options.cloneFrom || options.clone || (options.isClone ? targetProf : null);
+
+      // 1. NẾU SỬ DỤNG CHẾ ĐỘ CLONE TỪ PROFILE MẪU (Ví dụ: --clone=32231)
+      if (cloneTarget) {
+        try {
+          const { data: allProfiles } = await axios.get(`${this._launcherApiUrl}/profiles`, { headers: this._headers, timeout: 5000 }).catch(() => ({ data: [] }));
+          if (Array.isArray(allProfiles) && allProfiles.length > 0) {
+            const matched = allProfiles.find(p =>
+              p.id === cloneTarget ||
+              p.name === cloneTarget ||
+              (p.name && p.name.trim().toLowerCase() === cloneTarget.trim().toLowerCase())
+            );
+
+            if (matched) {
+              console.log(`🧬 [Clone Profile] Đang nhân bản (Clone) từ Profile mẫu chuẩn: '${matched.name}' (ID: ${matched.id})...`);
+              const { data: clonedMeta } = await axios.post(`${this._launcherApiUrl}/profiles/${matched.id}/clone`, {}, { headers: this._headers });
+              if (clonedMeta && clonedMeta.id) {
+                this._profileId = clonedMeta.id;
+                this._isCreatedProfile = true; // Sẽ tự động dọn dẹp bản clone sau khi đăng ký xong
+                console.log(`✨ [Clone Success] Đã tạo Profile Clone mới ID: ${this._profileId} ('${clonedMeta.name}'). Đang khởi chạy...`);
+
+                const { data: startRes } = await axios.post(`${this._launcherApiUrl}/profiles/${this._profileId}/start`, { headless: false }, { headers: this._headers });
+                const wsUrl = startRes.cdp?.web_socket_debugger_url;
+
+                if (wsUrl) {
+                  this._browser = await puppeteer.connect({ browserWSEndpoint: wsUrl, defaultViewport: null, protocolTimeout: 240000 });
+                  this._ownsBrowser = false;
+                  console.log(`🔗 [CDP Connected] Đã kết nối Puppeteer vào Profile Clone '${clonedMeta.name}'.`);
+                  return this._browser;
+                }
+              }
+            } else {
+              console.warn(`⚠️ [Clone Warning] Không tìm thấy Profile mẫu '${cloneTarget}' để Clone.`);
+            }
+          }
+        } catch (cloneErr) {
+          console.warn(`⚠️ [Clone Error]: ${cloneErr.message}`);
+        }
+      }
+
+      // 2. NẾU CHỈ ĐỊNH PROFILE CÓ SẴN (Chạy trực tiếp trên Profile đó, không clone)
+      if (targetProf) {
+        try {
+          const { data: allProfiles } = await axios.get(`${this._launcherApiUrl}/profiles`, { headers: this._headers, timeout: 5000 }).catch(() => ({ data: [] }));
+          if (Array.isArray(allProfiles) && allProfiles.length > 0) {
+            const matched = allProfiles.find(p =>
+              p.id === targetProf ||
+              p.name === targetProf ||
+              (p.name && p.name.trim().toLowerCase() === targetProf.trim().toLowerCase())
+            );
+
+            if (matched) {
+              this._profileId = matched.id;
+              this._isCreatedProfile = false; // Đánh dấu là profile người dùng, KHÔNG XÓA khi kết thúc
+              console.log(`✨ [Existing Profile] Tìm thấy Profile có sẵn: '${matched.name}' (ID: ${matched.id}). Đang khởi chạy...`);
+
+              const { data: startRes } = await axios.post(`${this._launcherApiUrl}/profiles/${this._profileId}/start`, { headless: false }, { headers: this._headers });
+              const wsUrl = startRes.cdp?.web_socket_debugger_url;
+
+              if (wsUrl) {
+                this._browser = await puppeteer.connect({ browserWSEndpoint: wsUrl, defaultViewport: null, protocolTimeout: 240000 });
+                this._ownsBrowser = false;
+                console.log(`🔗 [CDP Connected] Đã kết nối Puppeteer vào Profile '${matched.name}'.`);
+                return this._browser;
+              }
+            } else {
+              console.warn(`⚠️ [Existing Profile] Không tìm thấy profile '${targetProf}' trong ShardBrowser -> Tiến hành tạo Profile tự động mới.`);
+            }
+          }
+        } catch (profErr) {
+          console.warn(`⚠️ [Profile Search Error]: ${profErr.message}`);
+        }
+      }
+
+      // BƯỚC 0: TỰ ĐỘNG XÓA SẠCH PROFILE TẠM CŨ THUỘC NHÓM 'GitHub-Auto' (Không đụng profile người dùng)
       await this._deleteAllOldProfiles();
 
       // BƯỚC 1: LỰA CHỌN PROXY THEO CHẾ ĐỘ CẤU HÌNH (direct | shard | rotate | inline static proxy)
@@ -1347,12 +1639,19 @@ export class AiAgentRunner {
         console.log("🌐 [Network Mode: DIRECT] Sử dụng IP mạng trực tiếp của máy tính (Không dùng Proxy).");
       } else if (effectiveMode === "shard") {
         const targetGroup = (options.proxyGroup || this._proxyGroup || "all").trim().toLowerCase();
-        console.log(`🌐 [Network Mode: SHARD] Đang quét danh sách Proxy ${targetGroup === 'all' ? 'toàn bộ pool' : `thuộc nhóm [${targetGroup.toUpperCase()}]`}...`);
+        console.log(`🌐 [Network Mode: SHARD] Đang quét danh sách Proxy từ ShardBrowser ${targetGroup === 'all' ? '(toàn bộ UI pool)' : `thuộc nhóm [${targetGroup.toUpperCase()}]`}...`);
         try {
-          let list = this._loadLocalProxies();
-          if (!Array.isArray(list) || list.length === 0) {
-            const { data: proxies } = await axios.get(`${this._launcherApiUrl}/proxies`, { headers: this._headers, timeout: 3000 }).catch(() => ({ data: [] }));
-            if (Array.isArray(proxies)) list = proxies;
+          let list = [];
+          try {
+            const { data: apiProxies } = await axios.get(`${this._launcherApiUrl}/proxies`, { headers: this._headers, timeout: 3000 });
+            if (Array.isArray(apiProxies) && apiProxies.length > 0) {
+              list = apiProxies;
+              console.log(`✨ [ShardBrowser UI] Đã nạp thành công ${list.length} Proxy trực tiếp từ phần mềm ShardBrowser.`);
+            }
+          } catch {}
+
+          if (!list || list.length === 0) {
+            list = this._loadLocalProxies();
           }
 
           if (Array.isArray(list) && list.length > 0) {
@@ -1374,12 +1673,12 @@ export class AiAgentRunner {
             if (chosenProxy) {
               this._activeProxy = chosenProxy;
               const authInfo = (chosenProxy.username || chosenProxy.user) ? ` | User: ${chosenProxy.username || chosenProxy.user}` : " | No Auth";
-              console.log(`🎲 [Selected Proxy ShardX] -> [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | Ping: ${chosenProxy._verifiedLatency ? `${chosenProxy._verifiedLatency}ms` : '<1.5s'}`);
+              console.log(`🎲 [Selected Proxy ShardBrowser] -> [${chosenProxy.name || chosenProxy.host}] (${chosenProxy.kind || 'http'}://${chosenProxy.host}:${chosenProxy.port}${authInfo}) | Ping: ${chosenProxy._verifiedLatency ? `${chosenProxy._verifiedLatency}ms` : 'Live'}`);
             } else {
-              console.log("⚠️ [ShardX] Không có proxy nào còn sống và phản hồi dưới 1500ms -> Chạy Direct IP mạng nhà.");
+              console.log("⚠️ [ShardX] Không tìm thấy proxy còn sống -> Chạy Direct IP mạng nhà.");
             }
           } else {
-            console.log("ℹ️ [ShardX] Không có proxy nào trong Shard/File -> Chạy IP Direct.");
+            console.log("ℹ️ [ShardX] Không có proxy nào trong ShardBrowser UI -> Chạy IP Direct.");
           }
         } catch (proxyErr) {
           console.warn(`⚠️ [Proxy ShardX] Lỗi kiểm tra proxy (${proxyErr.message}) -> Chạy IP Direct.`);
@@ -1424,9 +1723,29 @@ export class AiAgentRunner {
         }
       }
 
-      // BƯỚC 2: SINH BỘ FINGERPRINT WINDOWS ĐỒNG NHẤT (CANVAS/WEBGL/AUDIO NOISE)
-      console.log("🛡️ [Fingerprint Isolation] Đang sinh Fingerprint Windows đồng nhất (Canvas/WebGL/Audio Noise)...");
-      const { data: fpRes } = await axios.get(`${this._launcherApiUrl}/fingerprint/new/windows`, { headers: this._headers, timeout: 4000 });
+      // BƯỚC 2: SINH CẤU HÌNH FINGERPRINT CHUẨN NATIVE (ĐỒNG BỘ PHẦN CỨNG 100%)
+      console.log("🛡️ [Fingerprint Isolation] Đang khởi tạo cấu hình Hardware Fingerprint chuẩn Native (Đồng bộ Proxy/Hardware)...");
+      let baseFp = {};
+      try {
+        const { data: fpRes } = await axios.get(`${this._launcherApiUrl}/fingerprint/new/windows`, { headers: this._headers, timeout: 4000 });
+        if (fpRes && fpRes.fingerprint) {
+          baseFp = fpRes.fingerprint;
+        }
+      } catch {}
+
+      // Đồng bộ hóa triệt để: Timezone, Geo, Language tự động theo IP Proxy; Tắt noise để giữ Hardware Native 100%
+      baseFp.timezone = "auto";
+      baseFp.geolocation = { mode: "auto" };
+      baseFp.webrtc = "block";
+      baseFp.noise = {
+        audio: { enabled: false },
+        canvas: { enabled: false },
+        client_rects: { enabled: false, max_offset: 0 },
+        fonts: { enabled: false },
+        sensors: { enabled: false },
+        webgl: { enabled: false, intensity: 0 }
+      };
+      baseFp.blocked_ports = [1080, 3030, 3128, 3389, 5800, 5900, 5901, 5938, 6568, 7070, 8080];
       
       // BƯỚC 3: TẠO PROFILE MỚI THUỘC NHÓM 'GitHub-Auto'
       const sessionSuffix = Date.now().toString().slice(-4);
@@ -1452,7 +1771,16 @@ export class AiAgentRunner {
         notes: `Tách biệt hoàn toàn | Proxy: ${formattedProxy || 'Direct'} | Ping: ${chosenProxy?._verifiedLatency ? `${chosenProxy._verifiedLatency}ms` : '<1.5s'} | Time: ${new Date().toLocaleTimeString()}`,
         proxy: formattedProxy,
         proxy_id: chosenProxy?.id && !String(chosenProxy.id).startsWith("file_") ? chosenProxy.id : null,
-        fingerprint: fpRes.fingerprint,
+        webrtc: "block",
+        fingerprint: baseFp,
+        noise: {
+          audio: { enabled: false },
+          canvas: { enabled: false },
+          client_rects: { enabled: false, max_offset: 0 },
+          fonts: { enabled: false },
+          sensors: { enabled: false },
+          webgl: { enabled: false, intensity: 0 }
+        }
       };
 
       const { data: createdProfile } = await axios.post(`${this._launcherApiUrl}/profiles`, profilePayload, { headers: this._headers });
@@ -1628,30 +1956,32 @@ export class AiAgentRunner {
     try {
       // 1. Kết nối hoặc Khởi chạy Trình duyệt với Profile Fingerprint mới & Proxy
       await this._connectOrLaunchBrowser(options);
-      const pages = await this._browser.pages();
-      const firstPage = pages[0] || (await this._browser.newPage());
-      firstPage.setDefaultNavigationTimeout(120000);
-      firstPage.setDefaultTimeout(120000);
-
-      // Tự động tiêm script chống phát hiện tự động hóa (Stealth Evasions)
-      await this._injectStealthEvasions(firstPage);
 
       // Tự động xác thực Proxy Authentication nếu proxy có User & Password
       const applyProxyAuth = async (p) => {
         if (!p || p.isClosed()) return;
-        if (this._activeProxy && (this._activeProxy.username || this._activeProxy.user) && (this._activeProxy.password || this._activeProxy.pass)) {
-          const u = this._activeProxy.username || this._activeProxy.user;
-          const pwd = this._activeProxy.password || this._activeProxy.pass;
-          try {
-            await p.authenticate({ username: u, password: pwd });
-            console.log(`🔐 [Proxy Auth] Đã nạp xác thực Proxy thành công cho tài khoản [${u}].`);
-          } catch (authErr) {
-            console.warn(`(!) Lỗi authenticate proxy: ${authErr.message}`);
+
+        let u = this._activeProxy?.username || this._activeProxy?.user || "";
+        let pwd = this._activeProxy?.password || this._activeProxy?.pass || "";
+
+        if ((!u || !pwd) && this._activeProxy?.host) {
+          const localProxies = this._loadLocalProxies();
+          const matched = localProxies.find(lp => lp.host === this._activeProxy.host && Number(lp.port) === Number(this._activeProxy.port) && lp.username);
+          if (matched) {
+            u = matched.username;
+            pwd = matched.password;
+            this._activeProxy.username = u;
+            this._activeProxy.password = pwd;
           }
         }
-      };
 
-      await applyProxyAuth(firstPage);
+        if (u && pwd) {
+          try {
+            await p.authenticate({ username: u, password: pwd });
+            console.log(`🔐 [Proxy Auth] Đã nạp xác thực Proxy cho tài khoản [${u}].`);
+          } catch {}
+        }
+      };
 
       // Tự động áp dụng xác thực Proxy và Stealth cho tất cả các tab mới
       this._browser.on("targetcreated", async (target) => {
@@ -1663,6 +1993,39 @@ export class AiAgentRunner {
           }
         } catch {}
       });
+
+      // 1. Lấy tab chính sẵn có của ShardBrowser
+      const pages = await this._browser.pages();
+      const workingPage = pages[0] || (await this._browser.newPage());
+      workingPage.setDefaultNavigationTimeout(120000);
+      workingPage.setDefaultTimeout(120000);
+
+      // Thiết lập kích thước cửa sổ chuẩn Desktop Maximized (tránh bị co lại thành mobile hamburger menu)
+      try {
+        await workingPage.setViewport({ width: 1920, height: 1080 });
+        const cdp = await workingPage.target().createCDPSession();
+        const { windowId } = await cdp.send("Browser.getWindowForTarget");
+        if (windowId) {
+          try {
+            await cdp.send("Browser.setWindowBounds", {
+              windowId,
+              bounds: { windowState: "maximized" }
+            });
+          } catch {
+            await cdp.send("Browser.setWindowBounds", {
+              windowId,
+              bounds: { width: 1600, height: 1000, windowState: "normal" }
+            });
+          }
+        }
+      } catch {}
+
+      // Đóng các tab phụ khác nếu có
+      if (pages.length > 1) {
+        for (let i = 1; i < pages.length; i++) {
+          try { await pages[i].close(); } catch {}
+        }
+      }
 
       // 2. Khởi tạo Email (Hotmail Graph API hoặc Gmail Creator hoặc Mail.tm)
       if (this._activeEmailService === "hotmail" && this._hotmailClient) {
@@ -1682,166 +2045,182 @@ export class AiAgentRunner {
         console.log(`👤 [Username Tạo lập]: ${this._accountState.username}`);
       }
 
-      // 3. Mở trang chủ GitHub và Bấm nút Sign up
-      console.log("\n[Bước 2] Mở trang chủ GitHub https://github.com/ và bấm nút Sign up...");
-      this._githubPage = firstPage;
+      // 3. Luồng điều hướng tự nhiên: Vào GitHub Homepage -> Bấm nút "Sign up" trên Header -> Vào form /signup
+      console.log("\n[Bước 2] Bắt đầu luồng điều hướng tự nhiên từ Trang chủ GitHub (https://github.com)...");
+      this._githubPage = workingPage;
       this._githubPage.setDefaultNavigationTimeout(120000);
       this._githubPage.setDefaultTimeout(120000);
 
       let isFormReady = false;
       const maxRetries = 5;
 
+      // Xóa session/cookie đăng nhập cũ để GitHub ở trạng thái khách (Logged out), tránh bị kẹt trong dashboard tài khoản trước
+      try {
+        const clientCookies = await this._githubPage.cookies();
+        if (clientCookies.length > 0) {
+          await this._githubPage.deleteCookie(...clientCookies);
+        }
+      } catch {}
+
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-          console.log(`⏳ [Tải trang chủ GitHub] Lần thử ${attempt}/${maxRetries}...`);
+          console.log(`⏳ [Tải GitHub] Lần thử ${attempt}/${maxRetries} (Khởi động từ Trang chủ)...`);
+
+          // 1. Vào trang chủ github.com trước để nạp Cookie phiên & Trust Score
           await this._githubPage.goto("https://github.com/", {
             waitUntil: "domcontentloaded",
-            timeout: 60000,
-          });
+            timeout: 45000,
+          }).catch(() => {});
 
-          await this._safeSleep(2000);
-          await this._detectAndCloseOverlays(this._githubPage);
+          await this._actionDelay(1500, 2500);
 
-          // BƯỚC 2.1: Giả lập người dùng bấm nút "Sign in" trên trang chủ GitHub
-          console.log("-> 1. Bấm nút 'Sign in' trên thanh điều hướng GitHub...");
-          let isNavigatedToLogin = false;
+          // Mô phỏng người dùng lướt nhẹ trang chủ trước khi bấm đăng ký
+          try {
+            await this._humanMouseMove(this._githubPage, 350 + Math.random() * 250, 220 + Math.random() * 180);
+            await this._safeSleep(500);
+            await this._smartScroll(this._githubPage, "down");
+            await this._safeSleep(600);
+            await this._smartScroll(this._githubPage, "up");
+            await this._safeSleep(600);
+          } catch {}
+
+          // 2. Điều hướng vào trang Đăng ký (Sign up)
+          console.log("-> Bắt đầu điều hướng vào Form Đăng ký từ Trang chủ...");
 
           try {
-            // Tìm nút Sign in qua các Selector chuẩn
-            const signInFound = await this._githubPage.evaluate(() => {
-              const selectors = [
-                "div.AuthCTAs-module__signInWrap__q2P60 span > span",
-                "div.AuthCTAs-module__signInWrap__q2P60 a",
-                "a[href*='/login']",
-                "header a[href*='login']",
-              ];
-              for (const sel of selectors) {
-                const el = document.querySelector(sel);
-                if (el) {
-                  el.scrollIntoView({ behavior: "smooth", block: "center" });
-                  el.click();
-                  return true;
+            if (!this._githubPage.url().includes("/signup")) {
+              // Tìm nút Sign up trên Header
+              let headerSignUpBtn = await this._githubPage.$("header a[href*='/signup'], a.HeaderMenu-link--sign-up, a[href*='/signup'].HeaderMenu-link");
+
+              // Nếu menu responsive mobile đang ẩn nút Sign up
+              if (!headerSignUpBtn) {
+                const hamburgerBtn = await this._githubPage.$("button[aria-label='Toggle navigation'], .HeaderMenu-toggle-button, button.js-details-target");
+                if (hamburgerBtn) {
+                  try {
+                    console.log("-> Mở menu điều hướng Header...");
+                    await hamburgerBtn.click({ delay: 60 });
+                    await this._safeSleep(600);
+                    headerSignUpBtn = await this._githubPage.$("a[href*='/signup']");
+                  } catch {}
                 }
               }
 
-              const allLinks = Array.from(document.querySelectorAll("a, button"));
-              const btn = allLinks.find((el) => {
-                const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
-                const href = el.getAttribute("href") || "";
-                return (txt === "sign in" || href.includes("/login")) && !href.includes("copilot");
-              });
-
-              if (btn) {
-                btn.scrollIntoView({ behavior: "smooth", block: "center" });
-                btn.click();
-                return true;
-              }
-              return false;
-            });
-
-            if (signInFound) {
-              await Promise.race([
-                this._githubPage.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}),
-                this._safeSleep(3000),
-              ]);
-              if (this._githubPage.url().includes("/login")) {
-                isNavigatedToLogin = true;
-                console.log("✅ [Chuyển Trang Login] Đã chuyển tới trang Đăng nhập (https://github.com/login)");
+              if (headerSignUpBtn) {
+                const box = await headerSignUpBtn.boundingBox().catch(() => null);
+                if (box && box.width > 0 && box.height > 0) {
+                  console.log("-> Di chuyển chuột và Click tự nhiên vào nút 'Sign up' trên Header...");
+                  await this._humanMouseMove(this._githubPage, box.x + box.width / 2, box.y + box.height / 2);
+                  await this._safeSleep(300 + Math.floor(Math.random() * 200));
+                  await Promise.all([
+                    this._githubPage.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}),
+                    headerSignUpBtn.click({ delay: 70 })
+                  ]);
+                  console.log("✅ [Header Click] Đã click nút 'Sign up'!");
+                }
               }
             }
-          } catch (signInErr) {
-            console.warn(`(!) Click Sign in không thành công: ${signInErr.message}`);
+          } catch (clickErr) {
+            console.warn(`(!) Lỗi click Header: ${clickErr.message}`);
           }
 
-          // BƯỚC 2.2: Trên trang Login, bấm link "Create an account"
-          if (isNavigatedToLogin || this._githubPage.url().includes("/login")) {
-            console.log("-> 2. Bấm link 'Create an account' dưới chân form đăng nhập...");
-            await this._safeSleep(1500);
-
-            try {
-              const createAccFound = await this._githubPage.evaluate(() => {
-                const selectors = [
-                  "div.authentication-footer a",
-                  "div.authentication-footer p a",
-                  "a[href*='/signup']",
-                  "a[href*='/join']",
-                ];
-                for (const sel of selectors) {
-                  const el = document.querySelector(sel);
-                  if (el) {
-                    el.scrollIntoView({ behavior: "smooth", block: "center" });
-                    el.click();
-                    return true;
-                  }
-                }
-
-                const allLinks = Array.from(document.querySelectorAll("a, button"));
-                const btn = allLinks.find((el) => {
-                  const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
-                  const href = el.getAttribute("href") || "";
-                  return txt.includes("create an account") || txt.includes("create account") || href.includes("/signup") || href.includes("/join");
-                });
-
-                if (btn) {
-                  btn.scrollIntoView({ behavior: "smooth", block: "center" });
-                  btn.click();
-                  return true;
-                }
-                return false;
-              });
-
-              if (createAccFound) {
-                await Promise.race([
-                  this._githubPage.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}),
-                  this._safeSleep(3000),
-                ]);
-                console.log(`✅ [Chuyển Trang Signup] Đã chuyển tiếp tới trang Đăng ký: ${this._githubPage.url()}`);
-              }
-            } catch (createErr) {
-              console.warn(`(!) Click Create account không thành công: ${createErr.message}`);
+          // Chờ URL chuyển sang signup (tối đa 10s)
+          const signupNavWait = Date.now();
+          while (Date.now() - signupNavWait < 10000) {
+            if (this._githubPage.url().includes("/signup")) {
+              console.log(`✅ [Trang Đăng Ký] Đã vào trang đăng ký thành công: ${this._githubPage.url()}`);
+              break;
             }
+            await this._safeSleep(800);
           }
 
-          // Dự phòng an toàn: nếu chưa vào được trang signup, điều hướng trực tiếp
-          if (!this._githubPage.url().includes("/signup") && !this._githubPage.url().includes("/join")) {
-            console.log("-> Dự phòng an toàn: Chuyển trực tiếp sang /signup?source=login...");
-            await this._githubPage.goto("https://github.com/signup?source=login", {
+          // Nếu vẫn chưa vào được trang signup -> Điều hướng trực tiếp kèm Referer từ Trang chủ
+          if (!this._githubPage.url().includes("/signup")) {
+            console.log("-> Chuyển hướng vào https://github.com/signup (Referer: https://github.com/)...");
+            await this._githubPage.goto("https://github.com/signup", {
+              referer: "https://github.com/",
               waitUntil: "domcontentloaded",
-              timeout: 60000,
+              timeout: 45000
             }).catch(() => {});
           }
 
-          // Polling chờ ô nhập email hoặc form sẵn sàng (tối đa 40s)
+          await this._actionDelay(2000, 3000);
+          await this._detectAndCloseOverlays(this._githubPage);
+
+          // Polling chờ ô nhập password/email trong trang signup hoặc giải Captcha (tối đa 90s)
           const waitStart = Date.now();
-          while (Date.now() - waitStart < 40000) {
+
+          while (Date.now() - waitStart < 90000) {
             await this._safeSleep(1500);
 
-            try {
-              await this._githubPage.mouse.move(100 + Math.random() * 400, 100 + Math.random() * 300, { steps: 5 });
-            } catch {}
-
             const pageState = await this._githubPage.evaluate(() => {
+              const currentUrl = window.location.href;
+              const isSignupUrl = currentUrl.includes("/signup");
+
+              // BẮT BUỘC PHẢI ĐANG Ở TRANG SIGNUP MỚI COI LÀ READY
+              if (!isSignupUrl) {
+                return {
+                  isSignupUrl: false,
+                  hasEmailInput: false,
+                  isCaptcha: false,
+                  isRateLimited: false,
+                  currentUrl,
+                  title: document.title,
+                };
+              }
+
               const body = (document.body ? document.body.innerText : "") + " " + (document.title || "");
               const lower = body.toLowerCase();
-              const emailInput = document.querySelector("#email, input[type='email'], input[name='user[email]'], input[autocomplete='email']");
-              const hasEmailInput = !!emailInput;
-              const isRateLimited = lower.includes("truy cập tạm thời bị hạn chế") ||
-                                    lower.includes("tạm thời hạn chế truy cập") ||
-                                    lower.includes("access is temporarily restricted") ||
-                                    lower.includes("access restricted") ||
-                                    lower.includes("temporarily restricted") ||
-                                    lower.includes("unusual activity from your device or network") ||
-                                    lower.includes("unusual traffic from your network") ||
-                                    lower.includes("robot on the same network") ||
-                                    lower.includes("too fast or too many times") ||
-                                    lower.includes("unable to verify your captcha response");
+
+              // CHỈ COI LÀ CÓ INPUT KHI THỰC SỰ ĐANG Ở TRANG SIGNUP
+              const signupEmailInput = !!document.querySelector("#email, input[name='user[email]'], input[autocomplete='email']");
+              const hasPasswordInput = !!document.querySelector("#password, input[name='user[password]']");
+              const hasEmailInput = signupEmailInput || hasPasswordInput;
+
+              // Kiểm tra DataDome Geo Captcha / Verification Required
+              const isCaptcha = lower.includes("why is this step needed") ||
+                                lower.includes("we detected unusual activity from your device or network") ||
+                                lower.includes("slide right to secure your access") ||
+                                lower.includes("verification required") ||
+                                lower.includes("geo.captcha-delivery.com") ||
+                                !!document.querySelector("#ddv1-captcha-container") ||
+                                !!document.querySelector("#captcha__audio__button") ||
+                                !!document.querySelector("iframe[src*='captcha-delivery']") ||
+                                !!document.querySelector("iframe[src*='geo.captcha']");
+
+              // Chỉ coi là Rate Limit khi thực sự bị khóa cứng không có Captcha solver
+              const isRateLimited = !isCaptcha && (
+                lower.includes("truy cập tạm thời bị hạn chế") ||
+                lower.includes("tạm thời hạn chế truy cập") ||
+                lower.includes("access is temporarily restricted") ||
+                lower.includes("access restricted") ||
+                lower.includes("temporarily restricted") ||
+                lower.includes("unable to verify your captcha response")
+              );
 
               return {
+                isSignupUrl: true,
                 hasEmailInput,
+                isCaptcha,
                 isRateLimited,
+                currentUrl,
                 title: document.title,
               };
-            }).catch(() => ({ hasEmailInput: false, isRateLimited: false }));
+            }).catch(() => ({ isSignupUrl: false, hasEmailInput: false, isCaptcha: false, isRateLimited: false }));
+
+            // Nếu vẫn đang ở trang chủ, tiếp tục chờ hoặc điều hướng sang /signup
+            if (!pageState.isSignupUrl) {
+              if (Date.now() - waitStart > 8000 && !this._githubPage.url().includes("/signup")) {
+                console.log("-> Đang ở trang chủ, chuyển tiếp vào https://github.com/signup...");
+                await this._githubPage.goto("https://github.com/signup", { referer: "https://github.com/", waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+              }
+              continue;
+            }
+
+            if (pageState.isCaptcha) {
+              await this._handleDataDomeCaptcha(this._githubPage, "audio");
+              await this._safeSleep(3000);
+              continue;
+            }
 
             if (pageState.isRateLimited) {
               console.warn("\n⚠️ [CẢNH BÁO RATE-LIMIT]: IP hiện tại đang bị GitHub hạn chế tạm thời!");
@@ -1850,7 +2229,7 @@ export class AiAgentRunner {
 
             if (pageState.hasEmailInput) {
               isFormReady = true;
-              console.log("✅ [Trang Sẵn Sàng] Form đăng ký GitHub đã tải hoàn tất và sẵn sàng nhập liệu!");
+              console.log(`✅ [Trang Sẵn Sàng] Form đăng ký GitHub đã tải hoàn tất (${pageState.currentUrl}) và sẵn sàng nhập liệu!`);
               break;
             }
           }
@@ -1873,12 +2252,13 @@ export class AiAgentRunner {
       }
 
       // 4. Điền Form Đăng Ký GitHub Theo Quy Trình Single-Page Chuẩn Xác (Human-like)
-      console.log("\n[Bước 3] Thực hiện điền form đăng ký GitHub (Human-like với delay 1.5s mỗi bước)...");
+      console.log("\n[Bước 3] Thực hiện điền form đăng ký GitHub (Human-like với delay 1.0s - 1.8s mỗi bước)...");
 
-      // 4.1 Điền Email
+      // 4.1 Chờ và Điền Email
       console.log(`-> 1. Nhập Email: ${this._accountState.email}`);
+      await this._githubPage.waitForSelector("#email, input[type='email'], input[name='user[email]'], input[autocomplete='email']", { visible: true, timeout: 30000 });
       await this._humanType(this._githubPage, "#email, input[type='email'], input[name='user[email]'], input[autocomplete='email']", this._accountState.email, false);
-      await this._safeSleep(1500);
+      await this._actionDelay(1000, 1800);
 
       // Kiểm tra ngay xem Email đã từng được tạo trên GitHub trước đó chưa
       let isEmailTaken = await this._githubPage.evaluate(() => {
@@ -1897,13 +2277,13 @@ export class AiAgentRunner {
       console.log(`-> 2. Nhập Password: ${this._accountState.password}`);
       await this._githubPage.waitForSelector("#password, input[name='user[password]'], input[type='password']", { visible: true, timeout: 20000 });
       await this._humanType(this._githubPage, "#password, input[name='user[password]'], input[type='password']", this._accountState.password, false);
-      await this._safeSleep(1500);
+      await this._actionDelay(1000, 1800);
 
       // 4.3 Điền Username
       console.log(`-> 3. Nhập Username: ${this._accountState.username}`);
       await this._githubPage.waitForSelector("#login, input[name='user[login]']", { visible: true, timeout: 20000 });
       await this._humanType(this._githubPage, "#login, input[name='user[login]']", this._accountState.username, false);
-      await this._safeSleep(1500);
+      await this._actionDelay(1000, 1800);
 
       // Kiểm tra nếu username bị trùng
       let isUsernameTaken = await this._githubPage.evaluate(() => {
@@ -1915,12 +2295,12 @@ export class AiAgentRunner {
         this._accountState.username = `${this._accountState.username}${Date.now().toString().slice(-4)}`;
         console.log(`🔄 [Username Thay thế]: ${this._accountState.username}`);
         await this._humanType(this._githubPage, "#login, input[name='user[login]']", this._accountState.username, false);
-        await this._safeSleep(1500);
+        await this._actionDelay(1000, 1800);
       }
 
       // 4.4 Chờ validation hoàn tất và kiểm tra lại Email lần 2
-      console.log("-> 4. Chờ 1.5s để GitHub kiểm tra tính hợp lệ của toàn bộ Form...");
-      await this._safeSleep(1500);
+      console.log("-> 4. Chờ GitHub kiểm tra tính hợp lệ của toàn bộ Form...");
+      await this._actionDelay(1000, 1800);
 
       const isEmailTakenLate = await this._githubPage.evaluate(() => {
         const text = document.body ? document.body.innerText : "";
@@ -1949,21 +2329,21 @@ export class AiAgentRunner {
       if (!formValues.passVal || formValues.passVal.length < 8) {
         console.warn("⚠️ [Password Đang Rỗng] Kích hoạt điền bù Password ngay lập tức...");
         await this._humanType(this._githubPage, "#password, input[name='user[password]'], input[type='password']", this._accountState.password, false);
-        await this._safeSleep(1200);
+        await this._actionDelay(1000, 1800);
       }
 
       // Nếu ô Email bị thiếu, điền bù
       if (!formValues.emailVal) {
         console.warn("⚠️ [Email Đang Rỗng] Kích hoạt điền bù Email ngay lập tức...");
         await this._humanType(this._githubPage, "#email, input[type='email'], input[name='user[email]'], input[autocomplete='email']", this._accountState.email, false);
-        await this._safeSleep(1200);
+        await this._actionDelay(1000, 1800);
       }
 
       // Nếu ô Username bị thiếu, điền bù
       if (!formValues.loginVal) {
         console.warn("⚠️ [Username Đang Rỗng] Kích hoạt điền bù Username ngay lập tức...");
         await this._humanType(this._githubPage, "#login, input[name='user[login]']", this._accountState.username, false);
-        await this._safeSleep(1200);
+        await this._actionDelay(1000, 1800);
       }
 
       // Kiểm tra chốt hạ: Password BẮT BUỘC phải có độ dài >= 8 ký tự
@@ -1977,6 +2357,7 @@ export class AiAgentRunner {
       }
 
       console.log("-> 5. Gửi Form đăng ký và theo dõi chuyển sang trang xác thực OTP (Tự động click lại nếu kẹt)...");
+      await this._actionDelay(1000, 1800);
       
       let isMovedToVerify = false;
       const submitStartTime = Date.now();
@@ -1987,23 +2368,39 @@ export class AiAgentRunner {
 
         const currentUrl = this._githubPage.url();
 
-        // Kiểm tra xem có bị GitHub chặn/Rate limit sau khi bấm submit không
-        const checkRestricted = await this._githubPage.evaluate(() => {
+        // Kiểm tra xem có bị GitHub chặn/Rate limit hoặc yêu cầu Captcha sau khi bấm submit không
+        const pageCheck = await this._githubPage.evaluate(() => {
           const body = (document.body ? document.body.innerText : "") + " " + (document.title || "");
           const lower = body.toLowerCase();
-          return lower.includes("truy cập tạm thời bị hạn chế") ||
-                 lower.includes("tạm thời hạn chế truy cập") ||
-                 lower.includes("access is temporarily restricted") ||
-                 lower.includes("access restricted") ||
-                 lower.includes("temporarily restricted") ||
-                 lower.includes("unusual activity from your device or network") ||
-                 lower.includes("unusual traffic from your network") ||
-                 lower.includes("robot on the same network") ||
-                 lower.includes("too fast or too many times") ||
-                 lower.includes("unable to verify your captcha response");
-        }).catch(() => false);
+          const isCaptcha = lower.includes("why is this step needed") ||
+                            lower.includes("we detected unusual activity from your device or network") ||
+                            lower.includes("slide right to secure your access") ||
+                            lower.includes("verification required") ||
+                            lower.includes("geo.captcha-delivery.com") ||
+                            !!document.querySelector("#ddv1-captcha-container") ||
+                            !!document.querySelector("#captcha__audio__button") ||
+                            !!document.querySelector("iframe[src*='captcha-delivery']") ||
+                            !!document.querySelector("iframe[src*='arkoselabs']");
 
-        if (checkRestricted) {
+          const isRateLimited = !isCaptcha && (
+            lower.includes("truy cập tạm thời bị hạn chế") ||
+            lower.includes("tạm thời hạn chế truy cập") ||
+            lower.includes("access is temporarily restricted") ||
+            lower.includes("access restricted") ||
+            lower.includes("temporarily restricted") ||
+            lower.includes("unable to verify your captcha response")
+          );
+
+          return { isCaptcha, isRateLimited };
+        }).catch(() => ({ isCaptcha: false, isRateLimited: false }));
+
+        if (pageCheck.isCaptcha) {
+          await this._handleDataDomeCaptcha(this._githubPage, "audio");
+          await this._safeSleep(3000);
+          continue;
+        }
+
+        if (pageCheck.isRateLimited) {
           console.warn("\n⚠️ [CẢNH BÁO RATE-LIMIT]: GitHub đã tạm thời hạn chế truy cập từ IP này sau khi gửi Form!");
           throw new Error("GITHUB_RATE_LIMITED: GitHub tạm thời hạn chế truy cập (Rate Limit). Vui lòng đổi Proxy hoặc IP mới!");
         }
@@ -2022,45 +2419,34 @@ export class AiAgentRunner {
           break;
         }
 
-        // Nếu vẫn còn kẹt ở trang signup -> Kích hoạt click lại 'Create account'
-        console.log(`⏳ [Kiểm Tra URL] Vẫn ở trang đăng ký (${currentUrl}). Tiến hành cuộn và click lại 'Create account'...`);
-        
-        await this._detectAndCloseOverlays(this._githubPage);
-        await this._smartScroll(this._githubPage, "down");
-        await this._safeSleep(600);
+        // Nếu vẫn còn kẹt ở trang signup và KHÔNG có Captcha -> Kích hoạt click lại 'Create account'
+        if (!pageCheck.isCaptcha) {
+          console.log(`⏳ [Kiểm Tra URL] Vẫn ở trang đăng ký (${currentUrl}). Chờ phản hồi hoặc click lại 'Create account'...`);
+          
+          await this._detectAndCloseOverlays(this._githubPage);
+          await this._smartScroll(this._githubPage, "down");
+          await this._safeSleep(600);
 
-        // 1. Thử click qua DOM evaluate
-        await this._githubPage.evaluate(() => {
-          const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], [role='button']"));
-          const createBtn = buttons.find(b => {
-            const txt = (b.innerText || b.value || b.textContent || "").trim().toLowerCase();
-            return txt.includes("create account");
-          });
-          if (createBtn) {
-            createBtn.scrollIntoView({ behavior: "smooth", block: "center" });
-            createBtn.removeAttribute("disabled");
-            createBtn.click();
-          }
-        }).catch(() => {});
-
-        // 2. Thử click native Puppeteer
-        try {
-          const allButtons = await this._githubPage.$$("button, input[type='submit']");
-          for (const btn of allButtons) {
-            const text = await this._githubPage.evaluate(el => (el.innerText || el.value || el.textContent || "").trim().toLowerCase(), btn);
-            if (text.includes("create account")) {
-              await btn.evaluate(el => el.scrollIntoView({ behavior: "smooth", block: "center" }));
-              await btn.click({ delay: 50 });
-              break;
+          // Thử click nút 'Create account' bằng chuột thật (isTrusted: true 100%)
+          try {
+            const allButtons = await this._githubPage.$$("button, input[type='submit']");
+            for (const btn of allButtons) {
+              const text = await this._githubPage.evaluate(el => (el.innerText || el.value || el.textContent || "").trim().toLowerCase(), btn);
+              if (text.includes("create account")) {
+                const box = await btn.boundingBox().catch(() => null);
+                if (box) {
+                  await this._humanMouseMove(this._githubPage, box.x + box.width / 2, box.y + box.height / 2);
+                  await this._safeSleep(200);
+                }
+                await btn.click({ delay: 60 });
+                break;
+              }
             }
-          }
-        } catch {}
+          } catch {}
+        }
 
-        // 3. Nhấn Enter trên toàn form
-        await this._githubPage.keyboard.press("Enter");
-
-        // Chờ 5s để GitHub phản hồi trước khi kiểm tra lại vòng lặp
-        await this._safeSleep(5000);
+        // Chờ 4s để GitHub phản hồi trước khi kiểm tra lại vòng lặp
+        await this._safeSleep(4000);
       }
 
       // 5. Chờ chuyển sang trang Nhập OTP (Hỗ trợ nếu có bước giải Captcha)
@@ -2073,6 +2459,9 @@ export class AiAgentRunner {
         if (!this._githubPage || this._githubPage.isClosed()) break;
 
         const currentUrl = this._githubPage.url();
+
+        // Tự động kiểm tra và xử lý nếu gặp DataDome / Geo Captcha / Arkose Labs
+        await this._handleDataDomeCaptcha(this._githubPage, "audio");
 
         // Kiểm tra lại xem có bị hạn chế IP không
         const checkRestricted = await this._githubPage.evaluate(() => {

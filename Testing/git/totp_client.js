@@ -77,24 +77,30 @@ export class TotpClient {
   }
 
   /**
-   * Lấy mã OTP với tự động Fallback qua Public API nếu lỗi cục bộ
+   * Lấy mã OTP với tự động đồng bộ giờ chuẩn thế giới (Chống lệch giờ máy tính Windows)
    * @param {string} secretKey 
    * @returns {Promise<string>}
    */
   async getCodeWithFallback(secretKey) {
+    const cleanKey = String(secretKey).replace(/[\s-]/g, "").toUpperCase();
+
+    // 1. Ưu tiên hàng đầu: Lấy mã chuẩn tuyệt đối từ 2fa.live API (Tránh triệt để lỗi lệch giờ máy tính Windows)
     try {
-      return this.generateCode(secretKey);
-    } catch (localErr) {
-      console.warn(`⚠️ [TOTP Engine] Lỗi sinh cục bộ (${localErr.message}) -> Gọi Fallback 2fa.live API...`);
-      try {
-        const cleanKey = String(secretKey).replace(/\s+/g, "").toUpperCase();
-        const res = await axios.get(`https://2fa.live/tok/${cleanKey}`, { timeout: 6000 });
-        if (res.data && res.data.token) {
-          return String(res.data.token).trim();
-        }
-      } catch (apiErr) {
-        throw new Error(`Không thể sinh mã TOTP qua cả Local và Online API: ${apiErr.message}`);
+      const res = await axios.get(`https://2fa.live/tok/${cleanKey}`, { timeout: 4000 });
+      if (res.data && res.data.token) {
+        const onlineCode = String(res.data.token).trim();
+        console.log(`🌐 [TOTP Sync] Đã lấy mã 2FA chuẩn giờ máy chủ quốc tế: [ ${onlineCode} ]`);
+        return onlineCode;
       }
+    } catch (apiErr) {
+      console.warn(`⚠️ [TOTP Online] Không thể kết nối 2fa.live (${apiErr.message}) -> Dùng thuật toán HMAC-SHA1 nội bộ...`);
+    }
+
+    // 2. Fallback: Tính toán nội bộ bằng thuật toán RFC 6238
+    try {
+      return this.generateCode(cleanKey);
+    } catch (localErr) {
+      throw new Error(`Không thể sinh mã TOTP: ${localErr.message}`);
     }
   }
 }
