@@ -218,7 +218,7 @@ export class AiAgentRunner {
   _profileId = null;
   _isCreatedProfile = false;
   _activeProxy = null;
-  _proxyMode = "direct"; // "direct" | "shard" | "rotate"
+  _proxyMode = "shard"; // "shard" | "rotate" | "direct"
   _proxyGroup = "all";
   _gmailClient = null;
   _mailTm = null;
@@ -244,7 +244,7 @@ export class AiAgentRunner {
     this._launcherApiUrl = process.env.LAUNCHER_API_URL || liveConfig.url;
     this._launcherToken = process.env.LAUNCHER_API_TOKEN || liveConfig.token;
     this._headers = { Authorization: `Bearer ${this._launcherToken}` };
-    this._proxyMode = customConfig.proxyMode || process.env.PROXY_MODE || "direct";
+    this._proxyMode = customConfig.proxyMode || process.env.PROXY_MODE || "shard";
     this._proxyGroup = customConfig.proxyGroup || process.env.PROXY_GROUP || "all";
     this._gmailClient = new GmailCreatorClient(customConfig.rapidApiKey);
     this._mailTm = new MailTmClient();
@@ -263,7 +263,156 @@ export class AiAgentRunner {
     }
 
     const sessionSuffix = Date.now().toString().slice(-4);
-    this._accountState.password = customConfig.password || `ShardX@2026!Pass#${sessionSuffix}`;
+    this._accountState.username = `user${Math.random().toString(36).substring(2, 8)}${sessionSuffix}`;
+    this._accountState.password = `GitA!${crypto.randomBytes(4).toString("hex")}#${Math.floor(1000 + Math.random() * 9000)}`;
+  }
+
+  // Tự động tiêm script ẩn danh và vượt qua phát hiện tự động hóa (Anti-detect Stealth Toàn Diện)
+  async _injectStealthEvasions(page) {
+    if (!page || page.isClosed()) return;
+    try {
+      await page.evaluateOnNewDocument(() => {
+        // 1. Ẩn triệt để navigator.webdriver & cdc artifacts
+        try {
+          Object.defineProperty(navigator, "webdriver", {
+            get: () => undefined,
+          });
+          delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+          delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+          delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+        } catch {}
+
+        // 2. Giả lập đối tượng window.chrome đầy đủ
+        if (!window.chrome) {
+          window.chrome = {};
+        }
+        if (!window.chrome.runtime) {
+          window.chrome.runtime = {
+            PlatformOs: { MAC: "mac", WIN: "win", ANDROID: "android", CROS: "cros", LINUX: "linux", OPENBSD: "openbsd" },
+            PlatformArch: { ARM: "arm", X86_32: "x86-32", X86_64: "x86-64", MIPS: "mips", MIPS64: "mips64" },
+            PlatformNaclArch: { ARM: "arm", X86_32: "x86-32", X86_64: "x86-64", MIPS: "mips", MIPS64: "mips64" },
+            connect: function () {},
+            sendMessage: function () {},
+          };
+        }
+        if (!window.chrome.app) {
+          window.chrome.app = {
+            isInstalled: false,
+            InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" },
+            RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" },
+          };
+        }
+        if (!window.chrome.csi) {
+          window.chrome.csi = function () {};
+        }
+        if (!window.chrome.loadTimes) {
+          window.chrome.loadTimes = function () {
+            return {
+              requestTime: Date.now() / 1000,
+              startLoadTime: Date.now() / 1000,
+              commitLoadTime: Date.now() / 1000,
+              finishDocumentLoadTime: Date.now() / 1000,
+              finishLoadTime: Date.now() / 1000,
+              firstPaintTime: Date.now() / 1000,
+              firstPaintAfterLoadTime: 0,
+              navigationType: "Other",
+              wasFetchedViaSpdy: true,
+              wasNpnNegotiated: true,
+              npnNegotiatedProtocol: "h2",
+              wasAlternateProtocolAvailable: false,
+              connectionInfo: "h2",
+            };
+          };
+        }
+
+        // 3. Mock danh sách plugins & mimeTypes chuẩn trình duyệt desktop
+        try {
+          const pluginsList = [
+            { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+            { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+            { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+            { name: "Microsoft Edge PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+            { name: "WebKit built-in PDF", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+          ];
+          Object.defineProperty(navigator, "plugins", {
+            get: () => pluginsList,
+          });
+
+          const mimeTypesList = [
+            { type: "application/pdf", suffixes: "pdf", description: "Portable Document Format" },
+            { type: "text/pdf", suffixes: "pdf", description: "Portable Document Format" },
+          ];
+          Object.defineProperty(navigator, "mimeTypes", {
+            get: () => mimeTypesList,
+          });
+        } catch {}
+
+        // 4. Mock phần cứng chuẩn (Hardware Concurrency & RAM)
+        try {
+          Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
+          Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
+          Object.defineProperty(navigator, "maxTouchPoints", { get: () => 0 });
+        } catch {}
+
+        // 5. Mock languages chuẩn quốc tế
+        try {
+          Object.defineProperty(navigator, "languages", {
+            get: () => ["en-US", "en"],
+          });
+          Object.defineProperty(navigator, "language", {
+            get: () => "en-US",
+          });
+        } catch {}
+
+        // 6. Mock permissions query
+        try {
+          const originalQuery = window.navigator.permissions?.query;
+          if (originalQuery) {
+            window.navigator.permissions.query = (parameters) =>
+              parameters.name === "notifications"
+                ? Promise.resolve({ state: Notification.permission || "default" })
+                : originalQuery(parameters);
+          }
+        } catch {}
+
+        // 7. Spoof WebGL & WebGL2 Vendor / Renderer
+        try {
+          const spoofParam = (ctxProto) => {
+            if (!ctxProto) return;
+            const getParam = ctxProto.getParameter;
+            ctxProto.getParameter = function (parameter) {
+              if (parameter === 37445) return "Google Inc. (NVIDIA)";
+              if (parameter === 37446) return "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)";
+              return getParam.apply(this, arguments);
+            };
+          };
+          if (typeof WebGLRenderingContext !== "undefined") spoofParam(WebGLRenderingContext.prototype);
+          if (typeof WebGL2RenderingContext !== "undefined") spoofParam(WebGL2RenderingContext.prototype);
+        } catch {}
+
+        // 8. Đảm bảo kích thước cửa sổ outerWidth/outerHeight thực tế
+        try {
+          if (window.outerWidth === 0 || window.outerHeight === 0) {
+            window.outerWidth = window.innerWidth + 16;
+            window.outerHeight = window.innerHeight + 88;
+          }
+        } catch {}
+
+        // 9. Mock navigator.connection
+        try {
+          if (!navigator.connection) {
+            Object.defineProperty(navigator, "connection", {
+              get: () => ({
+                effectiveType: "4g",
+                rtt: 50,
+                downlink: 10,
+                saveData: false,
+              }),
+            });
+          }
+        } catch {}
+      });
+    } catch {}
   }
 
   // Helper chờ an toàn
@@ -279,26 +428,38 @@ export class AiAgentRunner {
   // Đọc danh sách Proxies từ ShardBrowser proxies.json và các file text (proxies_protocol.txt, proxies.txt)
   _loadLocalProxies() {
     const list = [];
-    const seen = new Set();
+    const addedKeys = new Set();
 
     const addEntry = (item) => {
       if (!item || !item.host || !item.port) return;
       const key = `${item.host}:${item.port}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        list.push(item);
-      }
+      if (addedKeys.has(key)) return;
+      addedKeys.add(key);
+
+      list.push({
+        id: item.id || `file_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        name: item.name || `Proxy ${item.host}:${item.port}`,
+        folder: item.folder || item.country || "all",
+        country: item.country || "all",
+        kind: item.kind || "http",
+        host: item.host,
+        port: item.port,
+        username: item.username || item.user || "",
+        password: item.password || item.pass || "",
+        proxyString: item.proxyString || null,
+      });
     };
 
     // 1. Đọc danh sách từ cấu hình ShardBrowser proxies.json
-    const homeDir = os.homedir();
-    const candidatePaths = [
-      process.env.APPDATA ? path.join(process.env.APPDATA, "shardx-launcher", "proxies.json") : null,
-      path.join(homeDir, ".config", "shardx-launcher", "proxies.json"),
-      path.join(homeDir, "AppData", "Roaming", "shardx-launcher", "proxies.json")
-    ].filter(Boolean);
+    const appData = process.env.APPDATA || (os.platform() === "darwin" ? path.join(os.homedir(), "Library", "Application Support") : path.join(os.homedir(), ".config"));
+    const possibleJsonPaths = [
+      path.join(appData, "shardx-launcher", "proxies.json"),
+      path.join(appData, "ShardBrowser", "proxies.json"),
+      path.resolve(process.cwd(), "proxies.json"),
+      path.resolve(process.cwd(), "Testing", "git", "proxies.json"),
+    ];
 
-    for (const p of candidatePaths) {
+    for (const p of possibleJsonPaths) {
       if (existsSync(p)) {
         try {
           const raw = readFileSync(p, "utf-8");
@@ -314,6 +475,8 @@ export class AiAgentRunner {
       path.resolve(process.cwd(), "Testing", "git", "proxies.txt"),
       path.resolve(__dirname, "proxies.txt"),
       path.resolve(process.cwd(), "Testing", "git", "proxies_protocol.txt"),
+      path.resolve(process.cwd(), "Testing", "proxify", "us_proxies.txt"),
+      path.resolve(process.cwd(), "Testing", "proxify", "proxies_protocol.txt"),
       path.resolve(process.cwd(), "proxies.txt"),
     ];
 
@@ -333,7 +496,6 @@ export class AiAgentRunner {
     // 3. Chỉ khi chưa có proxy nào mới quét thêm file công cộng Testing/proxify (dự phòng)
     if (list.length === 0) {
       const fallbackFiles = [
-        path.resolve(process.cwd(), "Testing", "proxify", "proxies_protocol.txt"),
         path.resolve(process.cwd(), "Testing", "proxify", "proxies_protocol.bak.txt"),
       ];
       for (const fp of fallbackFiles) {
@@ -1342,7 +1504,11 @@ export class AiAgentRunner {
         "--disable-dev-shm-usage",
         "--disable-accelerated-2d-canvas",
         "--disable-gpu",
-        "--window-size=1280,800"
+        "--window-size=1280,800",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-infobars",
+        "--lang=en-US,en",
+        "--enforce-webrtc-ip-permission-check"
       ];
       if (this._activeProxy) {
         const proxyArg = this._activeProxy.proxyString ? this._activeProxy.proxyString.replace(/^https?:\/\//i, "") : `${this._activeProxy.host}:${this._activeProxy.port}`;
@@ -1467,6 +1633,9 @@ export class AiAgentRunner {
       firstPage.setDefaultNavigationTimeout(120000);
       firstPage.setDefaultTimeout(120000);
 
+      // Tự động tiêm script chống phát hiện tự động hóa (Stealth Evasions)
+      await this._injectStealthEvasions(firstPage);
+
       // Tự động xác thực Proxy Authentication nếu proxy có User & Password
       const applyProxyAuth = async (p) => {
         if (!p || p.isClosed()) return;
@@ -1484,11 +1653,12 @@ export class AiAgentRunner {
 
       await applyProxyAuth(firstPage);
 
-      // Tự động áp dụng xác thực Proxy cho tất cả các tab mới
+      // Tự động áp dụng xác thực Proxy và Stealth cho tất cả các tab mới
       this._browser.on("targetcreated", async (target) => {
         try {
           const newP = await target.page();
           if (newP) {
+            await this._injectStealthEvasions(newP);
             await applyProxyAuth(newP);
           }
         } catch {}
@@ -1532,24 +1702,109 @@ export class AiAgentRunner {
           await this._safeSleep(2000);
           await this._detectAndCloseOverlays(this._githubPage);
 
-          // Bấm nút Sign up trên giao diện trang chủ GitHub
-          console.log("-> Bấm nút 'Sign up' trên giao diện GitHub...");
-          const clicked = await this._githubPage.evaluate(() => {
-            const elements = Array.from(document.querySelectorAll("a, button"));
-            const signupBtn = elements.find((el) => {
-              const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
-              const href = el.getAttribute("href") || "";
-              return (txt === "sign up" || txt === "sign up for github" || href.includes("/signup") || href.includes("/join")) && !txt.includes("copilot");
-            });
-            if (signupBtn) {
-              signupBtn.click();
-              return true;
-            }
-            return false;
-          });
+          // BƯỚC 2.1: Giả lập người dùng bấm nút "Sign in" trên trang chủ GitHub
+          console.log("-> 1. Bấm nút 'Sign in' trên thanh điều hướng GitHub...");
+          let isNavigatedToLogin = false;
 
-          if (!clicked) {
-            console.log("-> Thử chuyển trực tiếp sang /signup?source=login...");
+          try {
+            // Tìm nút Sign in qua các Selector chuẩn
+            const signInFound = await this._githubPage.evaluate(() => {
+              const selectors = [
+                "div.AuthCTAs-module__signInWrap__q2P60 span > span",
+                "div.AuthCTAs-module__signInWrap__q2P60 a",
+                "a[href*='/login']",
+                "header a[href*='login']",
+              ];
+              for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (el) {
+                  el.scrollIntoView({ behavior: "smooth", block: "center" });
+                  el.click();
+                  return true;
+                }
+              }
+
+              const allLinks = Array.from(document.querySelectorAll("a, button"));
+              const btn = allLinks.find((el) => {
+                const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
+                const href = el.getAttribute("href") || "";
+                return (txt === "sign in" || href.includes("/login")) && !href.includes("copilot");
+              });
+
+              if (btn) {
+                btn.scrollIntoView({ behavior: "smooth", block: "center" });
+                btn.click();
+                return true;
+              }
+              return false;
+            });
+
+            if (signInFound) {
+              await Promise.race([
+                this._githubPage.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}),
+                this._safeSleep(3000),
+              ]);
+              if (this._githubPage.url().includes("/login")) {
+                isNavigatedToLogin = true;
+                console.log("✅ [Chuyển Trang Login] Đã chuyển tới trang Đăng nhập (https://github.com/login)");
+              }
+            }
+          } catch (signInErr) {
+            console.warn(`(!) Click Sign in không thành công: ${signInErr.message}`);
+          }
+
+          // BƯỚC 2.2: Trên trang Login, bấm link "Create an account"
+          if (isNavigatedToLogin || this._githubPage.url().includes("/login")) {
+            console.log("-> 2. Bấm link 'Create an account' dưới chân form đăng nhập...");
+            await this._safeSleep(1500);
+
+            try {
+              const createAccFound = await this._githubPage.evaluate(() => {
+                const selectors = [
+                  "div.authentication-footer a",
+                  "div.authentication-footer p a",
+                  "a[href*='/signup']",
+                  "a[href*='/join']",
+                ];
+                for (const sel of selectors) {
+                  const el = document.querySelector(sel);
+                  if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el.click();
+                    return true;
+                  }
+                }
+
+                const allLinks = Array.from(document.querySelectorAll("a, button"));
+                const btn = allLinks.find((el) => {
+                  const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
+                  const href = el.getAttribute("href") || "";
+                  return txt.includes("create an account") || txt.includes("create account") || href.includes("/signup") || href.includes("/join");
+                });
+
+                if (btn) {
+                  btn.scrollIntoView({ behavior: "smooth", block: "center" });
+                  btn.click();
+                  return true;
+                }
+                return false;
+              });
+
+              if (createAccFound) {
+                await Promise.race([
+                  this._githubPage.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}),
+                  this._safeSleep(3000),
+                ]);
+                console.log(`✅ [Chuyển Trang Signup] Đã chuyển tiếp tới trang Đăng ký: ${this._githubPage.url()}`);
+              }
+            } catch (createErr) {
+              console.warn(`(!) Click Create account không thành công: ${createErr.message}`);
+            }
+          }
+
+          // Dự phòng an toàn: nếu chưa vào được trang signup, điều hướng trực tiếp
+          if (!this._githubPage.url().includes("/signup") && !this._githubPage.url().includes("/join")) {
+            console.log("-> Dự phòng an toàn: Chuyển trực tiếp sang /signup?source=login...");
             await this._githubPage.goto("https://github.com/signup?source=login", {
               waitUntil: "domcontentloaded",
               timeout: 60000,
@@ -1566,14 +1821,20 @@ export class AiAgentRunner {
             } catch {}
 
             const pageState = await this._githubPage.evaluate(() => {
-              const body = document.body ? document.body.innerText : "";
+              const body = (document.body ? document.body.innerText : "") + " " + (document.title || "");
+              const lower = body.toLowerCase();
               const emailInput = document.querySelector("#email, input[type='email'], input[name='user[email]'], input[autocomplete='email']");
               const hasEmailInput = !!emailInput;
-              const isRateLimited = body.includes("Truy cập tạm thời bị hạn chế") ||
-                                    body.includes("Access is temporarily restricted") ||
-                                    body.includes("Access restricted") ||
-                                    body.includes("unusual activity from your device or network") ||
-                                    body.includes("robot on the same network");
+              const isRateLimited = lower.includes("truy cập tạm thời bị hạn chế") ||
+                                    lower.includes("tạm thời hạn chế truy cập") ||
+                                    lower.includes("access is temporarily restricted") ||
+                                    lower.includes("access restricted") ||
+                                    lower.includes("temporarily restricted") ||
+                                    lower.includes("unusual activity from your device or network") ||
+                                    lower.includes("unusual traffic from your network") ||
+                                    lower.includes("robot on the same network") ||
+                                    lower.includes("too fast or too many times") ||
+                                    lower.includes("unable to verify your captcha response");
 
               return {
                 hasEmailInput,
@@ -1584,7 +1845,7 @@ export class AiAgentRunner {
 
             if (pageState.isRateLimited) {
               console.warn("\n⚠️ [CẢNH BÁO RATE-LIMIT]: IP hiện tại đang bị GitHub hạn chế tạm thời!");
-              throw new Error("GitHub tạm thời hạn chế truy cập từ IP này (Rate Limit). Vui lòng đổi Proxy mới!");
+              throw new Error("GITHUB_RATE_LIMITED: GitHub tạm thời hạn chế truy cập từ IP này (Rate Limit). Vui lòng đổi Proxy mới!");
             }
 
             if (pageState.hasEmailInput) {
@@ -1601,7 +1862,7 @@ export class AiAgentRunner {
             await this._safeSleep(3000);
           }
         } catch (loadErr) {
-          if (loadErr.message.includes("Rate Limit")) throw loadErr;
+          if (loadErr.message.includes("Rate Limit") || loadErr.message.includes("GITHUB_RATE_LIMITED")) throw loadErr;
           console.warn(`⚠️ [Thử lại ${attempt}/${maxRetries}] Lỗi tải trang: ${loadErr.message}`);
           await this._safeSleep(5000);
         }
@@ -1725,6 +1986,28 @@ export class AiAgentRunner {
         if (!this._githubPage || this._githubPage.isClosed()) break;
 
         const currentUrl = this._githubPage.url();
+
+        // Kiểm tra xem có bị GitHub chặn/Rate limit sau khi bấm submit không
+        const checkRestricted = await this._githubPage.evaluate(() => {
+          const body = (document.body ? document.body.innerText : "") + " " + (document.title || "");
+          const lower = body.toLowerCase();
+          return lower.includes("truy cập tạm thời bị hạn chế") ||
+                 lower.includes("tạm thời hạn chế truy cập") ||
+                 lower.includes("access is temporarily restricted") ||
+                 lower.includes("access restricted") ||
+                 lower.includes("temporarily restricted") ||
+                 lower.includes("unusual activity from your device or network") ||
+                 lower.includes("unusual traffic from your network") ||
+                 lower.includes("robot on the same network") ||
+                 lower.includes("too fast or too many times") ||
+                 lower.includes("unable to verify your captcha response");
+        }).catch(() => false);
+
+        if (checkRestricted) {
+          console.warn("\n⚠️ [CẢNH BÁO RATE-LIMIT]: GitHub đã tạm thời hạn chế truy cập từ IP này sau khi gửi Form!");
+          throw new Error("GITHUB_RATE_LIMITED: GitHub tạm thời hạn chế truy cập (Rate Limit). Vui lòng đổi Proxy hoặc IP mới!");
+        }
+
         const hasOtpElement = await this._githubPage.evaluate(() => {
           const bodyText = document.body ? document.body.innerText : "";
           const hasOtpInput = !!document.querySelector("#launch-code-0, input[id^='launch-code'], [data-testid='otp-digit'], input[name='otp'], input[autocomplete='one-time-code']");
@@ -1790,6 +2073,28 @@ export class AiAgentRunner {
         if (!this._githubPage || this._githubPage.isClosed()) break;
 
         const currentUrl = this._githubPage.url();
+
+        // Kiểm tra lại xem có bị hạn chế IP không
+        const checkRestricted = await this._githubPage.evaluate(() => {
+          const body = (document.body ? document.body.innerText : "") + " " + (document.title || "");
+          const lower = body.toLowerCase();
+          return lower.includes("truy cập tạm thời bị hạn chế") ||
+                 lower.includes("tạm thời hạn chế truy cập") ||
+                 lower.includes("access is temporarily restricted") ||
+                 lower.includes("access restricted") ||
+                 lower.includes("temporarily restricted") ||
+                 lower.includes("unusual activity from your device or network") ||
+                 lower.includes("unusual traffic from your network") ||
+                 lower.includes("robot on the same network") ||
+                 lower.includes("too fast or too many times") ||
+                 lower.includes("unable to verify your captcha response");
+        }).catch(() => false);
+
+        if (checkRestricted) {
+          console.warn("\n⚠️ [CẢNH BÁO RATE-LIMIT]: GitHub đã tạm thời hạn chế truy cập từ IP này!");
+          throw new Error("GITHUB_RATE_LIMITED: GitHub tạm thời hạn chế truy cập (Rate Limit). Vui lòng đổi Proxy hoặc IP mới!");
+        }
+
         const checkOtpReady = await this._githubPage.evaluate(() => {
           const url = window.location.href;
           const bodyText = document.body ? document.body.innerText : "";

@@ -20,16 +20,20 @@ export class BatchRunner {
   // Private / Protected Properties
   _totalTarget = Infinity; // Mặc định chạy vô hạn
   _cooldownSeconds = 30; // Mặc định nghỉ 30s mỗi lần tạo 1 acc
+  _proxyMode = "shard"; // "shard" | "rotate" | "direct"
+  _proxyGroup = "all";
   _successCount = 0;
   _failedCount = 0;
   _currentRunner = null;
   _isStopping = false;
   _history = [];
 
-  constructor(totalTarget = 0, cooldownSeconds = 30) {
+  constructor(totalTarget = 0, cooldownSeconds = 30, proxyMode = "shard", proxyGroup = "all") {
     const num = Number(totalTarget);
     this._totalTarget = (!num || num <= 0) ? Infinity : num;
     this._cooldownSeconds = Number(cooldownSeconds) || 30;
+    this._proxyMode = proxyMode || "shard";
+    this._proxyGroup = proxyGroup || "all";
 
     // Lắng nghe tín hiệu dừng an toàn (Ctrl + C)
     process.on("SIGINT", async () => {
@@ -94,6 +98,7 @@ export class BatchRunner {
     console.log("                BẢNG TỔNG KẾT TIẾN ĐỘ BATCH RUNNER                ");
     console.log("==================================================================");
     console.log(`🎯 Mục tiêu đề ra   : ${this._totalTarget === Infinity ? "VÔ HẠN (24/7)" : `${this._totalTarget} tài khoản`}`);
+    console.log(`🌐 Chế độ mạng      : ${this._proxyMode.toUpperCase()}`);
     console.log(`✅ Thành công       : ${this._successCount} tài khoản`);
     console.log(`❌ Thất bại/Lỗi     : ${this._failedCount} tài khoản`);
     console.log(`📊 Tỉ lệ thành công : ${successRate}%`);
@@ -110,7 +115,8 @@ export class BatchRunner {
 
     console.log("==================================================================");
     console.log(`🚀 KHỞI ĐỘNG BATCH RUNNER: ${isInfinite ? "CHẾ ĐỘ VÔ HẠN (24/7)" : `MỤC TIÊU ${this._totalTarget} TÀI KHOẢN`}`);
-    console.log(`⏱️ Nghỉ giữa các phiên: ${this._cooldownSeconds}s | Chế độ: Tự động chờ 1h khi hết Quota`);
+    console.log(`🌐 Chế độ mạng  : [${this._proxyMode.toUpperCase()}] ${this._proxyMode === 'direct' ? '(IP Direct mạng nhà - Chú ý: Dễ bị GitHub Rate-Limit)' : (this._proxyMode === 'shard' ? `(Proxy nhóm [${this._proxyGroup.toUpperCase()}] trong Shard)` : '(Proxy xoay proxyxoay.shop)')}`);
+    console.log(`⏱️ Nghỉ giữa    : ${this._cooldownSeconds}s mỗi tài khoản | Chế độ: Tự động chờ 1h khi hết Quota`);
     console.log("==================================================================\n");
 
     let index = 1;
@@ -122,7 +128,12 @@ export class BatchRunner {
       console.log(`<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<`);
 
       // 1. Khởi tạo một Instance Hoàn Toàn Mới (100% Tách Biệt Bộ Nhớ, Proxy, Profile)
-      const runnerInstance = new AiAgentRunner();
+      const isInlineProxy = this._proxyMode.includes(":") || this._proxyMode.includes("//");
+      const runnerInstance = new AiAgentRunner({
+        proxyMode: isInlineProxy ? "shard" : this._proxyMode,
+        proxyGroup: this._proxyGroup,
+        proxy: isInlineProxy ? this._proxyMode : undefined,
+      });
       this._currentRunner = runnerInstance;
 
       let isSuccess = false;
@@ -131,6 +142,9 @@ export class BatchRunner {
       try {
         await runnerInstance.runFullE2EWorkflow({
           saveSecrets: true,
+          proxyMode: isInlineProxy ? "shard" : this._proxyMode,
+          proxyGroup: this._proxyGroup,
+          proxy: isInlineProxy ? this._proxyMode : undefined,
         });
 
         isSuccess = true;
@@ -153,6 +167,11 @@ export class BatchRunner {
         if (err.message && err.message.includes("EMAIL_ALREADY_EXISTS")) {
           console.warn(`\n🔄 [EMAIL ĐÃ TỒN TẠI]: Tự động bỏ qua lượt này và làm lại tài khoản #${index} mới từ đầu...`);
           // Không tăng index
+        } else if (err.message && (err.message.includes("GITHUB_RATE_LIMITED") || err.message.includes("Rate Limit"))) {
+          this._failedCount++;
+          console.warn(`\n⚠️ [RATE LIMIT IP]: ${err.message}`);
+          console.warn("👉 Khuyến nghị: Hãy dùng Proxy Shard/Proxy Xoay hoặc tăng cooldown để tránh bị hạn chế IP.");
+          index++;
         } else {
           this._failedCount++;
           console.error(`\n❌ [LỖI TÀI KHOẢN #${index}]: ${err.message} | Thời gian: ${this._formatTime(accTime)}`);
@@ -182,12 +201,47 @@ export class BatchRunner {
 // ==============================================================================
 // 2. CLI ENTRYPOINT
 // ==============================================================================
-async function main() {
+function parseBatchArgs() {
   const args = process.argv.slice(2);
-  const targetCount = parseInt(args[0] || process.env.BATCH_COUNT || "0", 10);
-  const cooldownSec = parseInt(args[1] || process.env.COOLDOWN_SEC || "30", 10);
+  let targetCount = parseInt(process.env.BATCH_COUNT || "0", 10);
+  let cooldownSec = parseInt(process.env.COOLDOWN_SEC || "30", 10);
+  let proxyMode = process.env.PROXY_MODE || "shard";
+  let proxyGroup = process.env.PROXY_GROUP || "all";
 
-  const batch = new BatchRunner(targetCount, cooldownSec);
+  for (const arg of args) {
+    if (arg.startsWith("--count=")) {
+      targetCount = parseInt(arg.replace(/^--count=/, ""), 10) || 0;
+    } else if (arg.startsWith("--cooldown=")) {
+      cooldownSec = parseInt(arg.replace(/^--cooldown=/, ""), 10) || 30;
+    } else if (arg.startsWith("--proxy=")) {
+      const pVal = arg.replace(/^--proxy=/, "").trim();
+      if (["direct", "shard", "rotate"].includes(pVal.toLowerCase())) {
+        proxyMode = pVal.toLowerCase();
+      } else {
+        proxyMode = pVal;
+      }
+    } else if (arg.startsWith("--group=") || arg.startsWith("--proxy-group=")) {
+      proxyGroup = arg.replace(/^--(group|proxy-group)=/, "").toLowerCase().trim();
+    } else if (arg === "--direct" || arg === "-d") {
+      proxyMode = "direct";
+    } else if (arg === "--shard" || arg === "-s") {
+      proxyMode = "shard";
+    } else if (arg === "--rotate" || arg === "-r") {
+      proxyMode = "rotate";
+    } else if (/^\d+$/.test(arg)) {
+      if (targetCount === 0) targetCount = parseInt(arg, 10);
+      else cooldownSec = parseInt(arg, 10);
+    } else if (["direct", "shard", "rotate"].includes(arg.toLowerCase())) {
+      proxyMode = arg.toLowerCase();
+    }
+  }
+
+  return { targetCount, cooldownSec, proxyMode, proxyGroup };
+}
+
+async function main() {
+  const { targetCount, cooldownSec, proxyMode, proxyGroup } = parseBatchArgs();
+  const batch = new BatchRunner(targetCount, cooldownSec, proxyMode, proxyGroup);
   await batch.run();
 }
 
