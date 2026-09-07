@@ -8,6 +8,7 @@
  * - Tự động lưu tài khoản vào output.txt và bắn về Web Dashboard qua API.
  * 
  * Cách dùng:
+ *   node batch_runner.js --manual-qa # Mở một profile + proxy để QA thủ công
  *   node batch_runner.js           # Chạy vô hạn liên tục, nghỉ 30s giữa mỗi acc (Default)
  *   node batch_runner.js 0 30      # Chạy vô hạn, nghỉ 30s giữa mỗi acc
  *   node batch_runner.js 500 30    # Chạy 500 tài khoản, nghỉ 30s giữa mỗi acc
@@ -15,6 +16,7 @@
  */
 
 import { AiAgentRunner } from "./ai_agent_runner.js";
+import { runManualQa } from "./manual_signup_qa.js";
 
 export class BatchRunner {
   // Private / Protected Properties
@@ -240,6 +242,13 @@ function parseBatchArgs() {
 }
 
 async function main() {
+  const rawArgs = process.argv.slice(2);
+  if (rawArgs.includes("--manual-qa")) {
+    const manualArgs = rawArgs.filter((arg) => arg !== "--manual-qa");
+    await runManualQa({ args: manualArgs });
+    return;
+  }
+
   const { targetCount, cooldownSec, proxyMode, proxyGroup } = parseBatchArgs();
   const batch = new BatchRunner(targetCount, cooldownSec, proxyMode, proxyGroup);
   await batch.run();

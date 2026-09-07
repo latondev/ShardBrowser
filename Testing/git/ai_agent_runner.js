@@ -723,216 +723,48 @@ export class AiAgentRunner {
     return null;
   }
 
-  // Tự động phát hiện và xử lý Captcha (DataDome / geo.captcha-delivery.com / Arkose / Octocaptcha)
-  async _handleDataDomeCaptcha(page, mode = "auto") {
+  // Phát hiện CAPTCHA và chờ người kiểm thử xử lý trực tiếp trên trình duyệt.
+  async _handleDataDomeCaptcha(page, _mode = "manual") {
     if (!page || page.isClosed() || !this._browser) return false;
 
-    try {
-      // 1. Kiểm tra các tab / target con có URL captcha-delivery
-      const targets = this._browser.targets();
-      let captchaTarget = targets.find(t => t.url().includes("captcha-delivery.com") || t.url().includes("geo.captcha") || t.url().includes("datadome"));
-      let captchaPage = null;
+    const hasCaptcha = async () => {
+      if (!page || page.isClosed() || !this._browser) return false;
+      const captchaUrl = /captcha-delivery\.com|geo\.captcha|arkoselabs|datadome/i;
+      const hasCaptchaTarget = this._browser.targets().some((target) => captchaUrl.test(target.url()));
+      const hasCaptchaFrame = page.frames().some((frame) => captchaUrl.test(frame.url()));
+      const hasCaptchaContent = await page.evaluate(() => {
+        const body = `${document.body?.innerText || ""} ${document.title || ""}`.toLowerCase();
+        return body.includes("why is this step needed") ||
+               body.includes("we detected unusual activity from your device or network") ||
+               body.includes("verification required") ||
+               body.includes("slide right to secure your access") ||
+               !!document.querySelector("#ddv1-captcha-container, .datadome-container, #captcha__audio__button, iframe[src*='captcha-delivery'], iframe[src*='geo.captcha'], iframe[src*='arkoselabs']");
+      }).catch(() => false);
+      return hasCaptchaTarget || hasCaptchaFrame || hasCaptchaContent;
+    };
 
-      if (captchaTarget) {
-        captchaPage = await captchaTarget.page().catch(() => null);
+    if (!(await hasCaptcha())) return false;
+
+    console.log("\n🧩 [CAPTCHA] Vui lòng giải thủ công trên cửa sổ trình duyệt. Runner đang chờ...");
+    const timeoutMs = 10 * 60 * 1000;
+    const startedAt = Date.now();
+    let clearChecks = 0;
+
+    while (Date.now() - startedAt < timeoutMs) {
+      await this._safeSleep(1000);
+      if (!page || page.isClosed() || !this._browser) return false;
+      if (await hasCaptcha()) {
+        clearChecks = 0;
+        continue;
       }
-
-      // 2. Kiểm tra các iframe trong trang chính
-      const frames = page.frames();
-      let captchaFrame = frames.find(f => f.url().includes("captcha-delivery.com") || f.url().includes("geo.captcha") || f.url().includes("arkoselabs") || f.url().includes("datadome"));
-
-      const ctx = captchaPage || captchaFrame || page;
-
-      // 3. Kiểm tra các dấu hiệu nhận biết DataDome Captcha
-      const captchaInfo = await ctx.evaluate(() => {
-        const body = (document.body ? document.body.innerText : "") + " " + (document.title || "");
-        const lower = body.toLowerCase();
-        const hasText = lower.includes("why is this step needed") ||
-                        lower.includes("we detected unusual activity from your device or network") ||
-                        lower.includes("verification required") ||
-                        lower.includes("slide right to secure your access") ||
-                        lower.includes("captcha-delivery");
-
-        const hasAudioBtn = !!(document.querySelector("#captcha__audio__button") || document.querySelector("[aria-label*='audio']"));
-        const hasPuzzleBtn = !!(document.querySelector("#captcha__puzzle__button") || document.querySelector("[aria-label*='visual']"));
-        const hasContainer = !!(document.querySelector("#ddv1-captcha-container") || document.querySelector(".datadome-container") || document.querySelector("iframe[src*='captcha-delivery']"));
-
-        return {
-          isDetected: hasText || hasAudioBtn || hasPuzzleBtn || hasContainer,
-          hasAudioBtn,
-        };
-      }).catch(() => ({ isDetected: false, hasAudioBtn: false }));
-
-      if (!captchaTarget && !captchaFrame && !captchaInfo.isDetected) {
-        return false;
-      }
-
-      console.log(`\n🧩 \x1b[33m[PHÁT HIỆN CAPTCHA]\x1b[0m Hệ thống phát hiện thử thách xác minh DataDome / Geo Captcha!`);
-
-      // ƯU TIÊN SỐ 1 TUYỆT ĐỐI: AUDIO CAPTCHA (Chuẩn cử chỉ người thật, không bị chặn Slider)
-      console.log("-> 1. Bấm nút chuyển sang chế độ Âm thanh (Audio Voice Captcha) bằng chuột thật...");
-
-      // Tìm nút Audio bằng ElementHandle
-      let switchedToAudio = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const audioBtn = await ctx.$("#captcha__audio__button, button.audio-button, button.audio-btn, button[data-type='audio'], [aria-label*='audio' i], [title*='audio' i]");
-          if (audioBtn) {
-            const box = await audioBtn.boundingBox();
-            if (box) {
-              await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
-              await this._safeSleep(200 + Math.floor(Math.random() * 150));
-            }
-            await audioBtn.click({ delay: 70 });
-            switchedToAudio = true;
-            break;
-          }
-        } catch {}
-        await this._safeSleep(1000);
-      }
-
-      await this._safeSleep(2000);
-
-      // Đăng ký listener bắt trọn vẹn file âm thanh khi trình duyệt phát
-      let capturedAudioBuf = null;
-      let capturedAudioUrl = null;
-      const audioListener = async (res) => {
-        try {
-          const u = res.url();
-          const ct = (res.headers()["content-type"] || "").toLowerCase();
-          if (u.includes("/captcha/audio") || u.includes(".wav") || u.includes(".mp3") || ct.includes("audio/")) {
-            capturedAudioUrl = u;
-            const buf = await res.buffer().catch(() => null);
-            if (buf && buf.length > 500) {
-              capturedAudioBuf = buf;
-            }
-          }
-        } catch {}
-      };
-      page.on("response", audioListener);
-
-      // Bấm nút Play phát âm thanh bằng chuột thật
-      console.log("-> 2. Bấm nút phát âm thanh đọc dãy số bằng chuột thật...");
-      try {
-        const playBtn = await ctx.$("div.audio-captcha-play-container > button, #captcha__audio button, button[aria-label*='Listen' i], button[aria-label*='Play' i], button.play-button");
-        if (playBtn) {
-          const box = await playBtn.boundingBox();
-          if (box) {
-            await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
-            await this._safeSleep(200 + Math.floor(Math.random() * 150));
-          }
-          await playBtn.click({ delay: 80 });
-        }
-      } catch {}
-
-      // Chờ stream audio tải về (tối đa 4s)
-      const audioWaitStart = Date.now();
-      while (Date.now() - audioWaitStart < 4000) {
-        if (capturedAudioBuf) break;
-        await this._safeSleep(300);
-      }
-      page.off("response", audioListener);
-
-      // QUAN TRỌNG: DataDome yêu cầu đợi phát hết âm thanh (khoảng 3.5s - 4.5s) trước khi gõ phím
-      console.log("⏳ [Nghe Âm Thanh] Chờ phát trọn vẹn dãy số trên trình duyệt...");
-      await this._safeSleep(3800 + Math.floor(Math.random() * 800));
-
-      // Fallback: Nếu listener không bắt được buffer, lấy link thẻ audio
-      if (!capturedAudioBuf) {
-        const audioUrl = await ctx.evaluate(() => {
-          const audioEl = document.querySelector("audio");
-          if (audioEl && audioEl.src) return audioEl.src;
-          const sourceEl = document.querySelector("audio source");
-          if (sourceEl && sourceEl.src) return sourceEl.src;
-          return null;
-        }).catch(() => null);
-
-        if (audioUrl) {
-          try {
-            const resp = await axios.get(audioUrl, { responseType: "arraybuffer", timeout: 8000 });
-            if (resp.data) capturedAudioBuf = Buffer.from(resp.data);
-          } catch {}
-        }
-      }
-
-      let recognizedDigits = null;
-      if (capturedAudioBuf) {
-        console.log("🤖 [AI Speech-to-Text] Đang nhận diện dãy số qua Deepgram Nova-2 / AI Speech...");
-        recognizedDigits = await this._recognizeSpeechFromBuffer(capturedAudioBuf, capturedAudioUrl || "audio.wav");
-      }
-
-      if (recognizedDigits) {
-        console.log(`🎯 [AI Speech-to-Text] Đã nhận diện thành công dãy số: [ \x1b[32m${recognizedDigits}\x1b[0m ]`);
-        console.log(`-> Đang điền tuần tự 6 ô số [${recognizedDigits}] vào form xác thực...`);
-
-        // Tìm các ô input trong card Audio Captcha
-        const allInputs = await ctx.$$("input[type='text'], input[type='tel'], input[type='number'], #ddv1-captcha-container input, #captcha__audio input");
-        
-        if (allInputs.length > 0) {
-          // Focus vào ô đầu tiên bằng chuột người thật
-          const firstInput = allInputs[0];
-          const firstBox = await firstInput.boundingBox().catch(() => null);
-          if (firstBox) {
-            await this._humanMouseMove(page, firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
-            await this._safeSleep(150);
-          }
-          await firstInput.click({ delay: 50 }).catch(() => {});
-          await this._safeSleep(200);
-
-          // Nếu có từ 6 ô độc lập trở lên: click từng ô và gõ bằng bàn phím native (isTrusted: true)
-          if (allInputs.length >= 6) {
-            for (let i = 0; i < recognizedDigits.length && i < allInputs.length; i++) {
-              const digit = recognizedDigits[i];
-              const inp = allInputs[i];
-
-              const box = await inp.boundingBox().catch(() => null);
-              if (box) {
-                await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
-                await this._safeSleep(60 + Math.floor(Math.random() * 50));
-              }
-              await inp.click({ delay: 40 }).catch(() => {});
-              await this._safeSleep(80 + Math.floor(Math.random() * 60));
-
-              // Gõ phím Chromium native (isTrusted: true 100%, KHÔNG dispatch synthetic event)
-              await page.keyboard.press(digit);
-              await this._safeSleep(150 + Math.floor(Math.random() * 120));
-            }
-          } else {
-            // Trường hợp 1 ô nhập gộp: gõ lần lượt từng số
-            for (const digit of recognizedDigits) {
-              await page.keyboard.press(digit);
-              await this._safeSleep(180 + Math.floor(Math.random() * 100));
-            }
-          }
-        }
-
-        // Dừng tự nhiên 1.5s - 2.2s như người thật kiểm tra lại dãy số trước khi bấm gửi
-        await this._safeSleep(1500 + Math.floor(Math.random() * 700));
-
-        // Bấm nút Verify hoàn toàn bằng chuột thật (isTrusted: true 100%, KHÔNG can thiệp DOM)
-        console.log("-> Bấm nút 'Verify' bằng chuột thật để hoàn tất xác thực...");
-        try {
-          const submitBtn = await ctx.$(".audio-captcha-submit-button, div.audio-captcha-submit-container > button, #captcha__audio button[type='submit'], [aria-label='Verify'], button.audio-captcha-submit, button[type='submit']");
-          if (submitBtn) {
-            const box = await submitBtn.boundingBox().catch(() => null);
-            if (box) {
-              await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
-              await this._safeSleep(300 + Math.floor(Math.random() * 200));
-            }
-            await submitBtn.click({ delay: 90 });
-            console.log("✅ [Captcha Submitted] Đã bấm nút Verify thành công!");
-          }
-        } catch {}
-
-        await this._safeSleep(5000);
+      clearChecks++;
+      if (clearChecks >= 2) {
+        console.log("✅ [CAPTCHA] Challenge đã đóng, runner tiếp tục.");
         return true;
       }
-
-      console.log("💡 [Hướng dẫn] Đang ở màn hình xác thực DataDome (Bạn có thể giải tiếp trên màn hình trình duyệt)...");
-      return true;
-    } catch (captchaErr) {
-      return false;
     }
+
+    throw new Error("CAPTCHA_MANUAL_TIMEOUT: Chưa hoàn tất CAPTCHA sau 10 phút.");
   }
 
   // Click an toàn không bấm nhầm Google/Apple/Link reload
