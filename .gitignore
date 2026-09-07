@@ -57,3 +57,5 @@ github-2fa-secrets.txt
 
 # ===== MCP server local install =====
 mcp/node_modules/
+# Added by code-review-graph
+.code-review-graph/
