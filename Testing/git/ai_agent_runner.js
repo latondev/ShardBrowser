@@ -24,6 +24,7 @@ import { writeFile, appendFile, chmod } from "node:fs/promises";
 import { MailTmClient } from "./mailtm_client.js";
 import { GmailCreatorClient } from "./gmail_creator_client.js";
 import { HotmailGraphClient } from "./hotmail_graph_client.js";
+import { UnlimitMailClient } from "./unlimitmail_client.js";
 import { TotpClient } from "./totp_client.js";
 import { ProxyXoayClient } from "./proxyxoay_client.js";
 import { AccountStorageService } from "./account_storage.js";
@@ -222,6 +223,7 @@ export class AiAgentRunner {
   _gmailClient = null;
   _mailTm = null;
   _hotmailClient = null;
+  _unlimitMail = null;
   _activeEmailService = "gmail";
   _totp = null;
   _proxyXoay = null;
@@ -247,6 +249,7 @@ export class AiAgentRunner {
     this._proxyGroup = customConfig.proxyGroup || process.env.PROXY_GROUP || "all";
     this._gmailClient = new GmailCreatorClient(customConfig.rapidApiKey);
     this._mailTm = new MailTmClient();
+    this._unlimitMail = customConfig.unlimitMailClient || new UnlimitMailClient();
     this._totp = new TotpClient();
     this._proxyXoay = new ProxyXoayClient();
     this._accountStorage = new AccountStorageService(customConfig.storageConfig);
@@ -257,6 +260,8 @@ export class AiAgentRunner {
     } else if (customConfig.accountLine) {
       this._hotmailClient = new HotmailGraphClient(customConfig.accountLine);
       this._activeEmailService = "hotmail";
+    } else if (customConfig.unlimitMailClient || customConfig.emailService === "unlimitmail" || customConfig.emailService === "unlimit") {
+      this._activeEmailService = "unlimitmail";
     } else if (customConfig.emailService) {
       this._activeEmailService = customConfig.emailService;
     }
@@ -1048,12 +1053,21 @@ export class AiAgentRunner {
       text = await this._bodyText(page);
       currentUrl = page.url();
       if (currentUrl.includes("/sessions/verified-device") || text.includes("Device verification") || text.includes("Verify your account")) {
-        console.log(`📬 [Device Verification] GitHub yêu cầu mã xác minh thiết bị từ ${this._activeEmailService === 'gmail' ? 'Gmail API' : 'Mail.tm'}...`);
+        const serviceName = this._activeEmailService === "hotmail" ? "Hotmail Graph API" : (this._activeEmailService === "unlimitmail" ? "UnlimitMail" : (this._activeEmailService === "gmail" ? "Gmail API" : "Mail.tm"));
+        console.log(`📬 [Device Verification] GitHub yêu cầu mã xác minh thiết bị từ ${serviceName}...`);
         try {
-          const devCodeRes = this._activeEmailService === "gmail"
-            ? await this._gmailClient.waitForVerificationCode(60, 3)
-            : await this._mailTm.waitForVerificationCode(60, 2);
-          if (devCodeRes.otpCode) {
+          let devCodeRes;
+          if (this._activeEmailService === "hotmail" && this._hotmailClient) {
+            const otpRes = await this._hotmailClient.waitForOtpCode({ filterSender: "github", timeoutMs: 60000 });
+            devCodeRes = { otpCode: otpRes.otpCode };
+          } else if (this._activeEmailService === "unlimitmail") {
+            devCodeRes = await this._unlimitMail.waitForVerificationCode(60, 2);
+          } else if (this._activeEmailService === "gmail") {
+            devCodeRes = await this._gmailClient.waitForVerificationCode(60, 3);
+          } else {
+            devCodeRes = await this._mailTm.waitForVerificationCode(60, 2);
+          }
+          if (devCodeRes && devCodeRes.otpCode) {
             console.log(`⚡ [Device OTP] Đã nhận mã thiết bị: [${devCodeRes.otpCode}], đang điền...`);
             await this._fillOtpDigits(page, devCodeRes.otpCode);
             await this._safeSleep(4000);
@@ -1753,6 +1767,9 @@ export class AiAgentRunner {
           await this._browser.disconnect().catch(() => {});
         }
       }
+      if (this._unlimitMail) {
+        await this._unlimitMail.close().catch(() => {});
+      }
     } catch (err) {
       console.warn(`(!) Lỗi khi dọn dẹp: ${err.message}`);
     }
@@ -1859,7 +1876,7 @@ export class AiAgentRunner {
         }
       }
 
-      // 2. Khởi tạo Email (Hotmail Graph API hoặc Gmail Creator hoặc Mail.tm)
+      // 2. Khởi tạo Email (Hotmail Graph API / UnlimitMail / Gmail Creator / Mail.tm)
       if (this._activeEmailService === "hotmail" && this._hotmailClient) {
         console.log("\n[Bước 1] Sử dụng tài khoản Hotmail/Outlook có sẵn qua Microsoft Graph API...");
         this._accountState.email = this._hotmailClient.email;
@@ -1867,14 +1884,38 @@ export class AiAgentRunner {
         this._accountState.username = `user${rawUser.slice(0, 10)}${Math.random().toString(36).substring(2, 6)}`;
         console.log(`📧 [Hotmail Email] : ${this._accountState.email}`);
         console.log(`👤 [Username Tạo lập]: ${this._accountState.username}`);
-      } else {
-        console.log("\n[Bước 1] Khởi tạo Email @gmail.com thật từ RapidAPI...");
-        const acc = await this._gmailClient.createAccount();
-        this._activeEmailService = "gmail";
+      } else if (this._activeEmailService === "unlimitmail") {
+        console.log("\n[Bước 1] Khởi tạo Email Temp từ UnlimitMail...");
+        const acc = await this._unlimitMail.createAccount();
         this._accountState.email = acc.address;
         this._accountState.username = acc.username;
-        console.log(`📧 [Gmail Tạo Lập]  : ${this._accountState.email}`);
+        console.log(`📧 [UnlimitMail Email]: ${this._accountState.email}`);
         console.log(`👤 [Username Tạo lập]: ${this._accountState.username}`);
+      } else if (this._activeEmailService === "mailtm") {
+        console.log("\n[Bước 1] Khởi tạo Email Temp từ Mail.tm...");
+        const acc = await this._mailTm.createAccount();
+        this._accountState.email = acc.address;
+        this._accountState.username = acc.username;
+        console.log(`📧 [Mail.tm Email]   : ${this._accountState.email}`);
+        console.log(`👤 [Username Tạo lập]: ${this._accountState.username}`);
+      } else {
+        console.log("\n[Bước 1] Khởi tạo Email @gmail.com thật từ RapidAPI...");
+        try {
+          const acc = await this._gmailClient.createAccount();
+          this._activeEmailService = "gmail";
+          this._accountState.email = acc.address;
+          this._accountState.username = acc.username;
+          console.log(`📧 [Gmail Tạo Lập]  : ${this._accountState.email}`);
+          console.log(`👤 [Username Tạo lập]: ${this._accountState.username}`);
+        } catch (gmailErr) {
+          console.warn(`⚠️ [Gmail API Quota/Error]: ${gmailErr.message} -> Tự động fallback sang UnlimitMail...`);
+          const acc = await this._unlimitMail.createAccount();
+          this._activeEmailService = "unlimitmail";
+          this._accountState.email = acc.address;
+          this._accountState.username = acc.username;
+          console.log(`📧 [UnlimitMail Fallback]: ${this._accountState.email}`);
+          console.log(`👤 [Username Tạo lập]    : ${this._accountState.username}`);
+        }
       }
 
       // 3. Luồng điều hướng tự nhiên: Vào GitHub Homepage -> Bấm nút "Sign up" trên Header -> Vào form /signup
@@ -2334,8 +2375,9 @@ export class AiAgentRunner {
         await this._safeSleep(2000);
       }
 
-      // 6. Xác thực OTP Email trực tiếp từ Microsoft Graph API / Gmail API / Mail.tm
-      console.log(`\n[Bước 5] Đang lấy mã OTP trực tiếp từ ${this._activeEmailService === 'hotmail' ? 'Hotmail Graph API' : (this._activeEmailService === 'gmail' ? 'Gmail API' : 'Mail.tm')}...`);
+      // 6. Xác thực OTP Email trực tiếp từ Microsoft Graph API / UnlimitMail / Gmail API / Mail.tm
+      const serviceLabel = this._activeEmailService === "hotmail" ? "Hotmail Graph API" : (this._activeEmailService === "unlimitmail" ? "UnlimitMail" : (this._activeEmailService === "gmail" ? "Gmail API" : "Mail.tm"));
+      console.log(`\n[Bước 5] Đang lấy mã OTP trực tiếp từ ${serviceLabel}...`);
       let result;
       if (this._activeEmailService === "hotmail" && this._hotmailClient) {
         const otpRes = await this._hotmailClient.waitForOtpCode({
@@ -2344,6 +2386,8 @@ export class AiAgentRunner {
           intervalMs: 2500,
         });
         result = { otpCode: otpRes.otpCode };
+      } else if (this._activeEmailService === "unlimitmail") {
+        result = await this._unlimitMail.waitForVerificationCode(90, 2);
       } else if (this._activeEmailService === "gmail") {
         result = await this._gmailClient.waitForVerificationCode(90, 3);
       } else {
@@ -2404,6 +2448,7 @@ async function main() {
   const args = process.argv.slice(2);
   let proxyMode = "direct"; // Mặc định chạy Direct máy tính, không chờ proxy
   let proxyGroup = "vn";
+  let emailService = process.env.EMAIL_SERVICE || "gmail";
 
   for (const arg of args) {
     if (arg === "--rotate" || arg === "-r") {
@@ -2412,12 +2457,20 @@ async function main() {
       proxyMode = "shard";
     } else if (arg === "--direct" || arg === "-d") {
       proxyMode = "direct";
+    } else if (arg === "--unlimitmail" || arg === "--unlimit" || arg === "-u") {
+      emailService = "unlimitmail";
+    } else if (arg === "--gmail" || arg === "-g") {
+      emailService = "gmail";
+    } else if (arg === "--mailtm" || arg === "-m") {
+      emailService = "mailtm";
+    } else if (arg.startsWith("--email=")) {
+      emailService = arg.replace(/^--email=/, "").trim();
     } else if (arg.startsWith("--group=")) {
       proxyGroup = arg.replace(/^--group=/, "").trim();
     }
   }
 
-  const runner = new AiAgentRunner({ proxyMode, proxyGroup });
+  const runner = new AiAgentRunner({ proxyMode, proxyGroup, emailService });
   try {
     await runner.runFullE2EWorkflow({
       saveSecrets: true,

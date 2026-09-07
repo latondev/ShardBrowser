@@ -19,15 +19,20 @@ Bộ công cụ tự động hóa **Đăng ký tài khoản GitHub 100% tự đ�
 
 ```text
 Testing/git/
-├── ai_agent_runner.js       # 🤖 Core Runner: Quy trình tạo profile -> Điền form -> OTP -> 2FA
-├── batch_runner.js          # 🔁 Chạy hàng loạt (Batch Mode) với số lượng và cooldown tùy chỉnh
-├── gmail_creator_client.js  # 📧 Client tạo Gmail qua RapidAPI (kèm pool keys & retry)
-├── mailtm_client.js         # 📬 Client email dự phòng (MailTm / TempMail)
-├── totp_client.js           # 🔐 Client giải mã Base32 và sinh mã TOTP 2FA
-├── proxyxoay_client.js      # 🌐 Client lấy và xoay Proxy từ proxyxoay.net
-├── rapidapikey.md           # 🔑 Danh sách 44 RapidAPI keys cho Gmail API
-├── benchmark.js             # ⚡ Đo lường hiệu năng và kiểm thử tốc độ
-└── README.md                # 📖 Tài liệu hướng dẫn sử dụng
+├── ai_agent_runner.js           # 🤖 Core Runner: Quy trình tạo profile -> Điền form -> OTP -> 2FA
+├── batch_runner.js              # 🔁 Chạy hàng loạt (Batch Mode) đa năng (Gmail/UnlimitMail/MailTm)
+├── batch_unlimitmail_runner.js  # 📬 Chạy hàng loạt chuyên dụng với UnlimitMail
+├── batch_hotmail_runner.js      # 📧 Chạy hàng loạt với Hotmail Graph OAuth2
+├── unlimitmail_client.js        # 🌐 Client UnlimitMail (temp-mail không giới hạn & auto OTP)
+├── gmail_creator_client.js      # 📧 Client tạo Gmail qua RapidAPI (kèm pool keys & retry)
+├── hotmail_graph_client.js      # 📧 Client Hotmail Microsoft Graph API
+├── mailtm_client.js             # 📬 Client email dự phòng (MailTm / TempMail)
+├── totp_client.js               # 🔐 Client giải mã Base32 và sinh mã TOTP 2FA
+├── proxyxoay_client.js          # 🌐 Client lấy và xoay Proxy từ proxyxoay.shop
+├── rapidapikey.md               # 🔑 Danh sách 44 RapidAPI keys cho Gmail API
+├── start.bat                    # 🚀 Menu tương tác khởi chạy nhanh tất cả lựa chọn
+├── benchmark.js                 # ⚡ Đo lường hiệu năng và kiểm thử tốc độ
+└── README.md                    # 📖 Tài liệu hướng dẫn sử dụng
 ```
 
 ---

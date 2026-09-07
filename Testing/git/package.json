@@ -6,8 +6,12 @@
   "scripts": {
     "start": "node batch_hotmail_runner.js --shard --cooldown=30",
     "hotmail:shard": "node batch_hotmail_runner.js --shard --cooldown=30",
+    "hotmail:rotate": "node batch_hotmail_runner.js --rotate --cooldown=20",
     "hotmail:direct": "node batch_hotmail_runner.js --direct --cooldown=30",
-    "gmail:batch": "node batch_runner.js 10 20",
+    "unlimit:shard": "node batch_unlimitmail_runner.js --shard --cooldown=30",
+    "unlimit:rotate": "node batch_unlimitmail_runner.js --rotate --cooldown=20",
+    "unlimit:direct": "node batch_unlimitmail_runner.js --direct --cooldown=60",
+    "gmail:batch": "node batch_runner.js 10 20 --gmail",
     "check-quota": "node check_rapidapi_quota.js"
   }
 }
