@@ -29,6 +29,8 @@ import { TotpClient } from "./totp_client.js";
 import { ProxyXoayClient } from "./proxyxoay_client.js";
 import { OMOCaptchaClient } from "./omocaptcha_client.js";
 import { AccountStorageService } from "./account_storage.js";
+import http from "node:http";
+import https from "node:https";
 import net from "node:net";
 import tls from "node:tls";
 
@@ -461,40 +463,67 @@ export class AiAgentRunner {
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
   }
 
-  // Tự động nhận diện Timezone, Locale, Geolocation động 100% theo IP của từng Proxy
+  // Tự động nhận diện Exit IP thật, Timezone, Locale, Geolocation động 100% bằng cách gửi request xuyên qua đường hầm Proxy
   async _resolveProxyGeoInfo(proxy) {
-    let timezone = "America/New_York";
-    let countryCode = "US";
-    let lat = 40.7128;
-    let lon = -74.0060;
-
     if (!proxy || !proxy.host) {
       return { timezone: "Asia/Ho_Chi_Minh", countryCode: "VN", locale: "vi-VN", languages: ["vi-VN", "vi", "en-US", "en"], lat: 21.0285, lon: 105.8542 };
     }
 
+    let geoResult = null;
+
+    // 1. Gửi request trực tiếp xuyên qua đường hầm Proxy tới ip-api.com để lấy Exit IP thật 100%
     try {
-      // 1. Tra cứu thông tin GeoIP thực tế từ máy chủ ip-api
-      const res = await axios.get(`http://ip-api.com/json/${proxy.host}?fields=status,country,countryCode,timezone,lat,lon`, { timeout: 3000 }).catch(() => null);
-      if (res?.data && res.data.status === "success") {
-        timezone = res.data.timezone || timezone;
-        countryCode = (res.data.countryCode || "US").toUpperCase();
-        lat = res.data.lat || lat;
-        lon = res.data.lon || lon;
-      }
+      geoResult = await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), 4000);
+        const auth = (proxy.username && proxy.password) ? `Basic ${Buffer.from(`${proxy.username}:${proxy.password}`).toString("base64")}` : null;
+
+        const req = http.request({
+          host: proxy.host,
+          port: proxy.port,
+          method: "GET",
+          path: "http://ip-api.com/json?fields=status,country,countryCode,timezone,lat,lon,query",
+          headers: {
+            Host: "ip-api.com",
+            "User-Agent": "Mozilla/5.0",
+            ...(auth ? { "Proxy-Authorization": auth } : {}),
+          },
+          timeout: 3500,
+        }, (res) => {
+          let data = "";
+          res.on("data", (chunk) => data += chunk);
+          res.on("end", () => {
+            clearTimeout(timer);
+            try {
+              const json = JSON.parse(data);
+              if (json.status === "success") resolve(json);
+              else resolve(null);
+            } catch {
+              resolve(null);
+            }
+          });
+        });
+
+        req.on("error", () => {
+          clearTimeout(timer);
+          resolve(null);
+        });
+        req.end();
+      });
     } catch {}
 
-    // 2. Nếu không lấy được qua API, tra cứu theo trường country / folder có sẵn
-    if (countryCode === "US" && (proxy.country || proxy.folder)) {
-      const hint = (proxy.country || proxy.folder || "").trim().toUpperCase();
-      if (hint === "VN" || hint.includes("VIETNAM")) countryCode = "VN";
-      else if (hint === "GB" || hint === "UK") countryCode = "GB";
-      else if (hint === "DE" || hint.includes("GERMAN")) countryCode = "DE";
-      else if (hint === "FR" || hint.includes("FRANCE")) countryCode = "FR";
-      else if (hint === "JP" || hint.includes("JAPAN")) countryCode = "JP";
-      else if (hint === "SG" || hint.includes("SINGAPORE")) countryCode = "SG";
-      else if (hint === "CA" || hint.includes("CANADA")) countryCode = "CA";
-      else if (hint === "AU" || hint.includes("AUSTRALIA")) countryCode = "AU";
+    // 2. Nếu request xuyên proxy bị timeout/lỗi, thử tra cứu trực tiếp host của proxy
+    if (!geoResult) {
+      try {
+        const res = await axios.get(`http://ip-api.com/json/${proxy.host}?fields=status,country,countryCode,timezone,lat,lon,query`, { timeout: 3000 }).catch(() => null);
+        if (res?.data && res.data.status === "success") geoResult = res.data;
+      } catch {}
     }
+
+    let countryCode = (geoResult?.countryCode || "US").toUpperCase();
+    let timezone = geoResult?.timezone || "America/New_York";
+    let lat = geoResult?.lat || 40.7128;
+    let lon = geoResult?.lon || -74.0060;
+    const exitIp = geoResult?.query || proxy.host;
 
     // 3. Mapping Country Code -> Timezone & Locale chuẩn
     const map = {
@@ -505,11 +534,14 @@ export class AiAgentRunner {
       FR: { tz: "Europe/Paris", loc: "fr-FR", langs: ["fr-FR", "fr", "en-US", "en"], lat: 48.8566, lon: 2.3522 },
       JP: { tz: "Asia/Tokyo", loc: "ja-JP", langs: ["ja-JP", "ja", "en-US", "en"], lat: 35.6762, lon: 139.6503 },
       SG: { tz: "Asia/Singapore", loc: "en-SG", langs: ["en-SG", "en", "zh-SG"], lat: 1.3521, lon: 103.8198 },
-      CA: { tz: "America/Toronto", loc: "en-CA", langs: ["en-CA", "en-US", "en"], lat: 43.6532, lon: -79.3832 },
+      CA: { tz: timezone || "America/Toronto", loc: "en-CA", langs: ["en-CA", "en-US", "en"], lat: 43.6532, lon: -79.3832 },
       AU: { tz: "Australia/Sydney", loc: "en-AU", langs: ["en-AU", "en-US", "en"], lat: -33.8688, lon: 151.2093 },
+      KE: { tz: "Africa/Nairobi", loc: "en-KE", langs: ["en-KE", "en", "sw-KE"], lat: -1.2921, lon: 36.8219 },
     };
 
     const target = map[countryCode] || { tz: timezone, loc: "en-US", langs: ["en-US", "en"], lat, lon };
+    console.log(`📍 [Real Exit IP] IP Thật của Proxy: [${exitIp}] (${geoResult?.country || countryCode}) - Timezone: [${target.tz}]`);
+
     return {
       timezone: target.tz,
       countryCode,
@@ -517,6 +549,7 @@ export class AiAgentRunner {
       languages: target.langs,
       lat: target.lat,
       lon: target.lon,
+      exitIp,
     };
   }
 
