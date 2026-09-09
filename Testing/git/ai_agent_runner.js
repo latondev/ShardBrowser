@@ -1007,6 +1007,22 @@ export class AiAgentRunner {
 
         for (const f of frames) {
           try {
+            // Kiểm tra Hard Block ngay trong frame
+            const isHardBlock = await f.evaluate(() => {
+              const body = `${document.body ? document.body.innerText : ""} ${document.title || ""}`.toLowerCase();
+              const humanTitle = document.querySelector("[data-dd-captcha-human-title], .captcha__human__title, [data-dd-captcha-human-container], .captcha__human__container");
+              const humanTitleText = (humanTitle?.innerText || "").toLowerCase();
+              return humanTitleText.includes("access is temporarily restricted") ||
+                     body.includes("access is temporarily restricted") ||
+                     body.includes("truy cập tạm thời bị hạn chế") ||
+                     body.includes("tạm thời hạn chế truy cập");
+            }).catch(() => false);
+
+            if (isHardBlock) {
+              console.warn("\n❌ [DATADOME HARD BLOCK]: Phát hiện 'Access is temporarily restricted' trong Slider Frame. Dừng ngay!");
+              throw new Error("GITHUB_RATE_LIMITED: Access is temporarily restricted (DataDome Hard Block). Vui lòng đổi Proxy hoặc IP khác!");
+            }
+
             for (const sel of sliderSelectors) {
               const el = await f.$(sel);
               if (el) {
@@ -1066,7 +1082,9 @@ export class AiAgentRunner {
 
               break;
             }
-          } catch {}
+          } catch (frameErr) {
+            if (frameErr.message.includes("GITHUB_RATE_LIMITED") || frameErr.message.includes("temporarily restricted")) throw frameErr;
+          }
         }
 
         if (btnHandle && btnBox) break;
@@ -1137,6 +1155,7 @@ export class AiAgentRunner {
       await this._safeSleep(2500);
       return true;
     } catch (err) {
+      if (err.message.includes("GITHUB_RATE_LIMITED") || err.message.includes("temporarily restricted")) throw err;
       console.warn(`(!) Lỗi giải Slider Captcha: ${err.message}`);
       return false;
     }
@@ -1188,7 +1207,20 @@ export class AiAgentRunner {
             const res = await ctx.evaluate(() => {
               const body = `${document.body ? document.body.innerText : ""} ${document.title || ""}`.toLowerCase();
               
-              // Kiểm tra lỗi Proxy làm đứt kết nối tới máy chủ Captcha DataDome
+              // 1. Kiểm tra Hard Block DataDome / GitHub (IP bị khóa cứng):
+              // <div data-dd-captcha-human-container="" class="captcha__human__container">
+              // <p data-dd-captcha-human-title="" class="captcha__human__title">Access is temporarily restricted</p>
+              const humanTitle = document.querySelector("[data-dd-captcha-human-title], .captcha__human__title, [data-dd-captcha-human-container], .captcha__human__container");
+              const humanTitleText = (humanTitle?.innerText || "").toLowerCase();
+              const isHardBlocked = humanTitleText.includes("access is temporarily restricted") ||
+                                    body.includes("access is temporarily restricted") ||
+                                    body.includes("access restricted") ||
+                                    body.includes("temporarily restricted") ||
+                                    body.includes("truy cập tạm thời bị hạn chế") ||
+                                    body.includes("tạm thời hạn chế truy cập") ||
+                                    body.includes("reasons may include");
+
+              // 2. Kiểm tra lỗi Proxy làm đứt kết nối tới máy chủ Captcha DataDome
               const isNetworkDead = body.includes("didn't send any data") ||
                                     body.includes("err_empty_response") ||
                                     body.includes("err_connection_reset") ||
@@ -1211,8 +1243,17 @@ export class AiAgentRunner {
               const hasExplicitText = !isMainForm && (body.includes("slide right to secure your access") || body.includes("why is this step needed"));
 
               const detected = visibleCaptchaIframe || visibleSliderBtn || hasExplicitText;
-              return { detected, isNetworkDead };
+              return { detected, isNetworkDead, isHardBlocked };
             });
+
+            if (res.isHardBlocked) {
+              if (this._activeProxy) {
+                AiAgentRunner._blacklistedProxyKeys.add(`${this._activeProxy.host}:${this._activeProxy.port}`);
+                console.warn(`\n⚠️ [CẢNH BÁO RATE-LIMIT]: IP Proxy [${this._activeProxy.host}:${this._activeProxy.port}] đã bị đưa vào blacklist tạm thời!`);
+              }
+              console.warn("\n❌ [DATADOME HARD BLOCK]: Phát hiện 'Access is temporarily restricted' (DataDome Hard Block). IP bị chặn cứng, tự động đóng trình duyệt và chuyển sang lượt tiếp theo!");
+              throw new Error("GITHUB_RATE_LIMITED: Access is temporarily restricted (DataDome Hard Block). Vui lòng đổi Proxy hoặc IP khác!");
+            }
 
             if (res.isNetworkDead) {
               console.warn("\n⚠️ [PROXY ĐỨT KẾT NỐI CAPTCHA]: Proxy hiện tại làm đứt kết nối với máy chủ DataDome ('geo.captcha-delivery.com didn't send any data')!");
@@ -1221,7 +1262,7 @@ export class AiAgentRunner {
 
             if (res.detected) return true;
           } catch (evalErr) {
-            if (evalErr.message.includes("PROXY_CAPTCHA_NETWORK_ERROR")) throw evalErr;
+            if (evalErr.message.includes("PROXY_CAPTCHA_NETWORK_ERROR") || evalErr.message.includes("GITHUB_RATE_LIMITED") || evalErr.message.includes("temporarily restricted")) throw evalErr;
           }
         }
         return false;
@@ -1487,6 +1528,9 @@ export class AiAgentRunner {
       }
       return false;
     } catch (captchaErr) {
+      if (captchaErr.message.includes("GITHUB_RATE_LIMITED") || captchaErr.message.includes("temporarily restricted") || captchaErr.message.includes("PROXY_CAPTCHA_NETWORK_ERROR")) {
+        throw captchaErr;
+      }
       console.warn(`(!) Lỗi xử lý Captcha: ${captchaErr.message}`);
       return false;
     }

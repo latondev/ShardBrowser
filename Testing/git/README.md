@@ -112,3 +112,9 @@ Sau khi hoàn tất đăng ký thành công mỗi tài khoản, thông tin bao g
 - **2FA Secret**: Khóa khôi phục 2FA Base32.
 - **Recovery Codes**: Danh sách mã khôi phục 2FA dự phòng.
 - **Thời gian hoàn thành**: Tốc độ xử lý trung bình ~40s - 60s / tài khoản.
+
+
+
+
+node batch_unlimitmail_runner.js --shard --cooldown=120 --slider
+>>

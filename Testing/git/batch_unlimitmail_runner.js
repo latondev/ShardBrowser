@@ -157,7 +157,7 @@ export class BatchUnlimitMailRunner {
           if (err.message && err.message.includes("EMAIL_ALREADY_EXISTS")) {
             console.warn(`\n🔄 [EMAIL ĐÃ TỒN TẠI]: Tự động bỏ qua và tạo tài khoản #${index} mới...`);
             break;
-          } else if (err.message && (err.message.includes("PROXY_BLOCKED_CDN") || err.message.includes("PROXY_CAPTCHA_NETWORK_ERROR") || err.message.includes("GITHUB_RATE_LIMITED") || err.message.includes("Rate Limit"))) {
+          } else if (err.message && (err.message.includes("PROXY_BLOCKED_CDN") || err.message.includes("PROXY_CAPTCHA_NETWORK_ERROR") || err.message.includes("GITHUB_RATE_LIMITED") || err.message.includes("Rate Limit") || err.message.includes("temporarily restricted"))) {
             console.warn(`\n🔄 [TỰ ĐỘNG ĐỔI PROXY] (${err.message}) -> Đang chuyển ngay sang Proxy sạch tiếp theo (Lần thử ${attempt}/${maxAttempts})...`);
             if (attempt >= maxAttempts) {
               this._failedCount++;
