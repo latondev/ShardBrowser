@@ -872,35 +872,39 @@ export class AiAgentRunner {
         };
         page.on("response", audioListener);
 
-        // BƯỚC 3: BẤM NÚT PLAY PHÁT ÂM THANH
-        console.log("-> 2. Bấm nút Play phát âm thanh đọc dãy số...");
-        for (let attempt = 1; attempt <= 4; attempt++) {
-          const contexts = getAllContexts();
-          for (const ctx of contexts) {
-            try {
-              const played = await ctx.evaluate(() => {
-                const playCandidates = Array.from(document.querySelectorAll("div.audio-captcha-play-container button, #captcha__audio button, button[aria-label*='listen' i], button[aria-label*='play' i], button.play-button, button[class*='play'], div[class*='play'] button"));
-                for (const b of playCandidates) {
-                  if (b && !b.hidden && b.getBoundingClientRect().width > 0) {
-                    b.scrollIntoView({ behavior: "smooth", block: "center" });
-                    b.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-                    b.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-                    b.click();
-                    return true;
-                  }
-                }
-                return false;
-              });
+        // BƯỚC 3: BẤM NÚT PLAY PHÁT ÂM THANH (CHỈ BẤM DUY NHẤT 1 LẦN ĐỂ TRÁNH BỊ PAUSE)
+        console.log("-> 2. Bấm nút Play phát âm thanh đọc dãy số (Chỉ bấm 1 lần duy nhất)...");
+        let hasTriggeredPlay = false;
 
-              if (played) break;
-            } catch {}
-          }
-          if (capturedAudioBuf) break;
-          await this._safeSleep(1000);
+        const contexts = getAllContexts();
+        for (const ctx of contexts) {
+          if (hasTriggeredPlay) break;
+          try {
+            const played = await ctx.evaluate(() => {
+              // Tìm nút Play chuẩn của DataDome Audio Captcha
+              const playCandidates = Array.from(document.querySelectorAll("div.audio-captcha-play-container button, #captcha__audio button, button[aria-label*='listen' i], button[aria-label*='play' i], button.play-button, button[class*='play'], div[class*='play'] button"));
+              for (const b of playCandidates) {
+                if (b && !b.hidden && b.getBoundingClientRect().width > 0) {
+                  b.scrollIntoView({ behavior: "smooth", block: "center" });
+                  b.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+                  b.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+                  b.click();
+                  return true;
+                }
+              }
+              return false;
+            });
+
+            if (played) {
+              hasTriggeredPlay = true;
+              break;
+            }
+          } catch {}
         }
 
+        // Chờ tải stream audio về (tối đa 5s)
         const audioWaitStart = Date.now();
-        while (Date.now() - audioWaitStart < 4000) {
+        while (Date.now() - audioWaitStart < 5000) {
           if (capturedAudioBuf) break;
           await this._safeSleep(300);
         }
@@ -982,7 +986,18 @@ export class AiAgentRunner {
               }
             } catch {}
           }
-          await this._safeSleep(4000);
+          // Chờ cho đến khi DataDome xác nhận xong và đóng container
+          const verifyStart = Date.now();
+          while (Date.now() - verifyStart < 8000) {
+            await this._safeSleep(1000);
+            if (!page || page.isClosed()) break;
+            const stillActive = await checkCaptchaDetected();
+            if (!stillActive) {
+              console.log("🎉 [DataDome Passed] Xác minh Captcha thành công, tiếp tục quy trình!");
+              break;
+            }
+          }
+          await this._safeSleep(1500);
           return true;
         }
       }
