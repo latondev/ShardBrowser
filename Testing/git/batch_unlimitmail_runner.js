@@ -31,13 +31,14 @@ export class BatchUnlimitMailRunner {
   _proxyGroup = "all";
   _profile = null;
   _cloneFrom = null;
+  _captchaMode = "slider"; // "slider" | "audio" | "auto"
   _successCount = 0;
   _failedCount = 0;
   _currentRunner = null;
   _isStopping = false;
   _history = [];
 
-  constructor(totalTarget = 0, cooldownSeconds = 30, proxyMode = "shard", proxyGroup = "all", profile = null, cloneFrom = null) {
+  constructor(totalTarget = 0, cooldownSeconds = 30, proxyMode = "shard", proxyGroup = "all", profile = null, cloneFrom = null, captchaMode = "slider") {
     const num = Number(totalTarget);
     this._totalTarget = (!num || num <= 0) ? Infinity : num;
     this._cooldownSeconds = Number(cooldownSeconds) || 30;
@@ -45,6 +46,7 @@ export class BatchUnlimitMailRunner {
     this._proxyGroup = proxyGroup || "all";
     this._profile = profile || null;
     this._cloneFrom = cloneFrom || null;
+    this._captchaMode = captchaMode || "slider";
 
     // Lắng nghe tín hiệu dừng an toàn (Ctrl + C)
     process.on("SIGINT", async () => {
@@ -117,6 +119,7 @@ export class BatchUnlimitMailRunner {
         proxyGroup: this._proxyGroup,
         proxy: isInlineProxy ? this._proxyMode : undefined,
         emailService: "unlimitmail",
+        captchaMode: this._captchaMode,
         profile: this._profile,
         cloneFrom: this._cloneFrom,
       });
@@ -145,6 +148,8 @@ export class BatchUnlimitMailRunner {
 
         if (err.message && err.message.includes("EMAIL_ALREADY_EXISTS")) {
           console.warn(`\n🔄 [EMAIL ĐÃ TỒN TẠI]: Tự động bỏ qua và tạo tài khoản #${index} mới...`);
+        } else if (err.message && (err.message.includes("PROXY_BLOCKED_CDN") || err.message.includes("PROXY_CAPTCHA_NETWORK_ERROR"))) {
+          console.warn(`\n🔄 [ĐỔI PROXY]: Proxy này bị nghẽn/đứt kết nối với CDN hoặc máy chủ Captcha của GitHub. Đang tự động đổi Proxy khác...`);
         } else if (err.message && (err.message.includes("GITHUB_RATE_LIMITED") || err.message.includes("Rate Limit"))) {
           this._failedCount++;
           console.warn(`\n⚠️ [RATE LIMIT IP]: ${err.message}`);
@@ -186,6 +191,7 @@ function parseArgs() {
   let proxyGroup = process.env.PROXY_GROUP || "all";
   let profile = process.env.SHARD_PROFILE || null;
   let cloneFrom = process.env.SHARD_CLONE_FROM || null;
+  let captchaMode = process.env.CAPTCHA_MODE || "slider";
 
   for (const arg of args) {
     if (arg.startsWith("--count=")) {
@@ -205,6 +211,12 @@ function parseArgs() {
       profile = arg.replace(/^--profile=/, "").trim();
     } else if (arg.startsWith("--clone-from=")) {
       cloneFrom = arg.replace(/^--clone-from=/, "").trim();
+    } else if (arg.startsWith("--captcha=")) {
+      captchaMode = arg.replace(/^--captcha=/, "").trim();
+    } else if (arg === "--slider") {
+      captchaMode = "slider";
+    } else if (arg === "--audio") {
+      captchaMode = "audio";
     } else if (arg === "--direct" || arg === "-d") {
       proxyMode = "direct";
     } else if (arg === "--shard" || arg === "-s") {
@@ -219,12 +231,12 @@ function parseArgs() {
     }
   }
 
-  return { targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom };
+  return { targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode };
 }
 
 async function main() {
-  const { targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom } = parseArgs();
-  const batch = new BatchUnlimitMailRunner(targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom);
+  const { targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode } = parseArgs();
+  const batch = new BatchUnlimitMailRunner(targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode);
   await batch.run();
 }
 

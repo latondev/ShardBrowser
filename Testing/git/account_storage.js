@@ -17,8 +17,12 @@
 
 import axios from "axios";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import { writeFile, appendFile, chmod } from "node:fs/promises";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Tự động nạp .env nếu có mà không cần thư viện dotenv bên ngoài
 if (typeof process.loadEnvFile === "function" && existsSync(path.join(process.cwd(), ".env"))) {
@@ -39,9 +43,9 @@ export class AccountStorageService {
     this._serverUrl = (process.env.REMOTE_SERVER_URL || customConfig.serverUrl || "http://127.0.0.1:8080").replace(/\/+$/, "");
     this._apiKey = process.env.REMOTE_API_KEY || customConfig.apiKey || "shardx-secret-api-key-2026-very-secure";
 
-    this._localOutputPath = path.join(process.cwd(), "Testing", "git", "output.txt");
-    this._fallbackOutputPath = path.join(process.cwd(), "Testing", "git", "fallback_accounts.txt");
-    this._secretsOutputPath = path.join(process.cwd(), "github-2fa-secrets.txt");
+    this._localOutputPath = customConfig.outputPath || path.join(__dirname, "output.txt");
+    this._fallbackOutputPath = customConfig.fallbackPath || path.join(__dirname, "fallback_accounts.txt");
+    this._secretsOutputPath = customConfig.secretsPath || path.join(__dirname, "github-2fa-secrets.txt");
   }
 
   // Phương thức lưu tài khoản chính

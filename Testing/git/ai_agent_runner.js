@@ -27,6 +27,7 @@ import { HotmailGraphClient } from "./hotmail_graph_client.js";
 import { UnlimitMailClient } from "./unlimitmail_client.js";
 import { TotpClient } from "./totp_client.js";
 import { ProxyXoayClient } from "./proxyxoay_client.js";
+import { OMOCaptchaClient } from "./omocaptcha_client.js";
 import { AccountStorageService } from "./account_storage.js";
 import net from "node:net";
 import tls from "node:tls";
@@ -235,6 +236,8 @@ export class AiAgentRunner {
   _activeEmailService = "gmail";
   _totp = null;
   _proxyXoay = null;
+  _omocaptchaClient = null;
+  _captchaMode = "slider"; // "slider" | "audio" | "auto"
   _accountStorage = null;
   _githubPage = null;
   _accountState = {
@@ -255,6 +258,8 @@ export class AiAgentRunner {
     this._headers = { Authorization: `Bearer ${this._launcherToken}` };
     this._proxyMode = customConfig.proxyMode || process.env.PROXY_MODE || "shard";
     this._proxyGroup = customConfig.proxyGroup || process.env.PROXY_GROUP || "all";
+    this._captchaMode = customConfig.captchaMode || process.env.CAPTCHA_MODE || "slider";
+    this._omocaptchaClient = customConfig.omocaptchaClient || new OMOCaptchaClient(customConfig.omocaptchaKey || process.env.OMOCAPTCHA_KEY);
     this._gmailClient = new GmailCreatorClient(customConfig.rapidApiKey);
     this._mailTm = new MailTmClient();
     this._unlimitMail = customConfig.unlimitMailClient || new UnlimitMailClient();
@@ -765,12 +770,278 @@ export class AiAgentRunner {
     return null;
   }
 
-  // Tự động phát hiện và giải Captcha bằng Audio Voice (DataDome / geo.captcha-delivery.com / Arkose)
-  async _handleDataDomeCaptcha(page, mode = "audio") {
-    if (!page || page.isClosed() || !this._browser) return false;
+  // Mô phỏng thao tác kéo chuột người thật (Human-like Mouse Drag với Ease-In-Out & Micro-jitter)
+  async _humanDragAndDrop(page, startX, startY, distanceX, targetFrame = null, btnSelector = null) {
+    if (!page || page.isClosed()) return false;
 
     try {
-      // 1. Thu thập tất cả contexts khả thi (page chính, các iframes, các popup targets)
+      const validDistance = Math.max(140, distanceX);
+
+      // Kích hoạt chuỗi Pointer/Mouse/Touch events trực tiếp trong context của Frame để đảm bảo 100% DataDome phản hồi
+      if (targetFrame) {
+        targetFrame.evaluate(async ({ selector, dist }) => {
+          const btn = selector ? document.querySelector(selector) : (
+            document.querySelector("#slider, .slider-button, .slider-btn, [role='slider'], .slider, [class*='slider-handle'], [class*='slider-thumb'], .tc-slider-normal, .geetest_slider_button") ||
+            document.querySelector("div[class*='slider'] button, div[class*='slider'] div, button[class*='slider']")
+          );
+          if (!btn) return;
+
+          const r = btn.getBoundingClientRect();
+          const startX = r.left + r.width / 2;
+          const startY = r.top + r.height / 2;
+
+          const fire = (type, x, y, buttons = 1) => {
+            const pe = new PointerEvent(type, { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons, pointerId: 1, pointerType: "mouse", isPrimary: true });
+            const me = new MouseEvent(type, { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons });
+            const te = new TouchEvent(type.replace("pointer", "touch").replace("mouse", "touch"), {
+              bubbles: true,
+              cancelable: true,
+              view: window,
+              touches: [new Touch({ identifier: 1, target: btn, clientX: x, clientY: y, screenX: x, screenY: y, pageX: x, pageY: y })],
+              targetTouches: [new Touch({ identifier: 1, target: btn, clientX: x, clientY: y, screenX: x, screenY: y, pageX: x, pageY: y })],
+              changedTouches: [new Touch({ identifier: 1, target: btn, clientX: x, clientY: y, screenX: x, screenY: y, pageX: x, pageY: y })]
+            });
+            try { btn.dispatchEvent(pe); } catch {}
+            try { btn.dispatchEvent(me); } catch {}
+            try { btn.dispatchEvent(te); } catch {}
+            try { document.dispatchEvent(pe); } catch {}
+            try { document.dispatchEvent(me); } catch {}
+            try { window.dispatchEvent(pe); } catch {}
+            try { window.dispatchEvent(me); } catch {}
+          };
+
+          fire("pointerdown", startX, startY, 1);
+          fire("mousedown", startX, startY, 1);
+
+          const totalSteps = 35;
+          for (let i = 1; i <= totalSteps; i++) {
+            const p = i / totalSteps;
+            const ease = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+            const curX = startX + dist * ease;
+            const curY = startY + Math.sin(p * Math.PI) * (Math.random() * 2 - 1);
+
+            fire("pointermove", curX, curY, 1);
+            fire("mousemove", curX, curY, 1);
+            await new Promise(res => setTimeout(res, 9));
+          }
+
+          await new Promise(res => setTimeout(res, 200));
+          fire("pointerup", startX + dist, startY, 0);
+          fire("mouseup", startX + dist, startY, 0);
+        }, { selector: btnSelector, dist: validDistance }).catch(() => {});
+      }
+
+      // 1. Di chuyển chuột CDP tới tâm nút trượt
+      await page.mouse.move(startX, startY, { steps: 6 });
+      await this._safeSleep(80 + Math.floor(Math.random() * 60));
+
+      // 2. Nhấn giữ chuột trái
+      await page.mouse.down({ button: "left" });
+      await this._safeSleep(120 + Math.floor(Math.random() * 80));
+
+      // 3. Kéo theo đường cong gia tốc tự nhiên (EaseInOutCubic)
+      const totalSteps = 35 + Math.floor(Math.random() * 15);
+      for (let i = 1; i <= totalSteps; i++) {
+        const progress = i / totalSteps;
+        const ease = progress < 0.5
+          ? 4 * progress * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+        const stepX = startX + validDistance * ease;
+        const jitterY = Math.sin(progress * Math.PI) * (Math.random() * 3 - 1.5);
+        const stepY = startY + jitterY;
+
+        await page.mouse.move(stepX, stepY);
+        await this._safeSleep(7 + Math.floor(Math.random() * 8));
+      }
+
+      // 4. Giữ chuột ở cuối thanh trượt cho server DataDome xác nhận
+      await this._safeSleep(300 + Math.floor(Math.random() * 100));
+      await page.mouse.up({ button: "left" });
+      await this._safeSleep(1200);
+      return true;
+    } catch (err) {
+      console.warn(`(!) Lỗi thao tác chuột HumanDrag: ${err.message}`);
+      try { await page.mouse.up({ button: "left" }); } catch {}
+      return false;
+    }
+  }
+
+  // Tự động giải Slider Captcha / Puzzle qua OMOCaptcha SliderAllWebTask
+  async _solveDataDomeSlider(page) {
+    if (!page || page.isClosed()) return false;
+    console.log("🧩 [OMOCaptcha Slider] Đang chờ network ổn định và định vị thanh trượt / mảnh ghép DataDome...");
+
+    try {
+      let targetFrame = null;
+      let btnHandle = null;
+      let btnBox = null;
+      let trackBox = null;
+      let isPuzzle = false;
+      let puzzleImgHandle = null;
+      let puzzleImgBox = null;
+      let puzzleBase64 = null;
+
+      const sliderSelectors = [
+        "#slider",
+        ".slider-button",
+        ".slider-btn",
+        "#captcha__slider__btn",
+        "div[role='slider']",
+        ".slider",
+        "[class*='slider-handle']",
+        "[class*='slider-thumb']",
+        "[class*='slider_thumb']",
+        "[class*='slider_handle']",
+        ".tc-slider-normal",
+        ".geetest_slider_button",
+        ".secsdk-captcha-drag-icon",
+        "button[class*='slider']",
+        "#secsdk-captcha-drag-wrapper",
+        ".slide-to-unlock",
+        "div.captcha-slider",
+        "#captcha__slider"
+      ];
+
+      // Quét định vị Slider trong vòng tối đa 15 giây
+      const scanStart = Date.now();
+      const maxScanTime = 15000;
+
+      while (Date.now() - scanStart < maxScanTime) {
+        if (!page || page.isClosed()) break;
+        const frames = page.frames ? page.frames() : [page];
+
+        for (const f of frames) {
+          try {
+            for (const sel of sliderSelectors) {
+              const el = await f.$(sel);
+              if (el) {
+                const box = await el.boundingBox();
+                if (box && box.width >= 10 && box.height >= 10 && box.width <= 160) {
+                  targetFrame = f;
+                  btnHandle = el;
+                  btnBox = box;
+                  break;
+                }
+              }
+            }
+
+            if (btnHandle) {
+              // Tìm khung trượt (track)
+              const trackEl = await f.$("#track, .slider-track, .track, .slider_track, [class*='track'], [class*='slider-bar'], div[class*='container']");
+              if (trackEl) {
+                const tb = await trackEl.boundingBox();
+                if (tb && tb.width >= 160 && tb.width > btnBox.width + 30) {
+                  trackBox = tb;
+                }
+              }
+
+              // Kiểm tra xem có phải dạng PUZZLE GHÉP MẢNH thực sự không (Canvas chữ nhật >= 240x110 hoặc thẻ img puzzle lớn)
+              const canvasEl = await f.$("canvas");
+              if (canvasEl) {
+                const cb = await canvasEl.boundingBox();
+                if (cb && cb.width >= 220 && cb.height >= 90 && (cb.width / cb.height >= 1.3)) {
+                  isPuzzle = true;
+                  puzzleImgHandle = canvasEl;
+                  puzzleImgBox = cb;
+                  try {
+                    puzzleBase64 = await f.evaluate(c => c.toDataURL("image/png"), canvasEl);
+                  } catch {}
+                }
+              }
+
+              if (!isPuzzle) {
+                const imgCandidates = await f.$$("img[class*='puzzle'], img[src*='puzzle'], img[id*='puzzle']");
+                for (const img of imgCandidates) {
+                  const ib = await img.boundingBox();
+                  if (ib && ib.width >= 220 && ib.height >= 90 && (ib.width / ib.height >= 1.3)) {
+                    isPuzzle = true;
+                    puzzleImgHandle = img;
+                    puzzleImgBox = ib;
+                    break;
+                  }
+                }
+              }
+
+              break;
+            }
+          } catch {}
+        }
+
+        if (btnHandle && btnBox) break;
+        await this._safeSleep(1200);
+      }
+
+      if (!btnHandle || !btnBox) {
+        console.warn("⚠️ Không tìm thấy nút Slider hoặc thanh trượt trong các frame (sau 15s chờ network & render).");
+        return false;
+      }
+
+      console.log(`🔍 Đã định vị Slider tại toạ độ thực (${Math.round(btnBox.x)}, ${Math.round(btnBox.y)}) - Kích thước nút: ${Math.round(btnBox.width)}x${Math.round(btnBox.height)}px.`);
+
+      const startX = btnBox.x + btnBox.width / 2;
+      const startY = btnBox.y + btnBox.height / 2;
+
+      let dragDistance = 0;
+
+      // 1. Nếu thực sự có ảnh ghép puzzle và có OMOCaptcha Client
+      if (this._omocaptchaClient && isPuzzle && puzzleImgBox) {
+        console.log("📸 [OMOCaptcha] Phát hiện ảnh Puzzle Captcha, đang trích xuất ảnh nền...");
+        let base64 = puzzleBase64;
+        const widthView = puzzleImgBox.width || 300;
+        const heightView = puzzleImgBox.height || 150;
+
+        if (!base64 && puzzleImgHandle) {
+          try {
+            const clip = {
+              x: Math.max(0, puzzleImgBox.x),
+              y: Math.max(0, puzzleImgBox.y),
+              width: Math.max(10, puzzleImgBox.width),
+              height: Math.max(10, puzzleImgBox.height),
+            };
+            base64 = await page.screenshot({ clip, encoding: "base64" });
+          } catch {}
+        }
+
+        if (base64) {
+          console.log(`🤖 [OMOCaptcha] Gửi ảnh (${Math.round(widthView)}x${Math.round(heightView)}px) tới AI SliderAllWebTask...`);
+          const solution = await this._omocaptchaClient.solveSlider(base64, widthView, heightView);
+          if (solution && solution.x !== undefined) {
+            const scale = trackBox ? (trackBox.width / widthView) : 1;
+            dragDistance = solution.x * scale;
+            console.log(`🎯 [OMOCaptcha] Khoảng cách trượt tính toán: ${Math.round(dragDistance)}px`);
+          }
+        }
+      }
+
+      // 2. Nếu là thanh trượt vuốt DataDome (Slide Right to Unlock) không có puzzle
+      if (!dragDistance) {
+        if (trackBox && trackBox.width > btnBox.width + 40) {
+          dragDistance = trackBox.width - btnBox.width - 4;
+          console.log(`🔄 [DataDome Swipe] Thanh trượt dạng Slide Right to Unlock, tính toán độ dài track: ${Math.round(dragDistance)}px`);
+        } else {
+          dragDistance = 260 + Math.floor(Math.random() * 20); // Độ dài tiêu chuẩn DataDome
+          console.log(`🔄 [DataDome Swipe] Thanh trượt dạng Slide Right to Unlock, kéo tiêu chuẩn: ${Math.round(dragDistance)}px`);
+        }
+      }
+
+      console.log(`⚡ [Human Mouse Drag] Đang thực hiện kéo thanh trượt (Từ ${Math.round(startX)},${Math.round(startY)} -> +${Math.round(dragDistance)}px)...`);
+      await this._humanDragAndDrop(page, startX, startY, dragDistance, targetFrame);
+
+      await this._safeSleep(2500);
+      return true;
+    } catch (err) {
+      console.warn(`(!) Lỗi giải Slider Captcha: ${err.message}`);
+      return false;
+    }
+  }
+
+  // Tự động phát hiện và giải Captcha (Hỗ trợ OMOCaptcha Slider & Deepgram Audio Voice)
+  async _handleDataDomeCaptcha(page, mode = null) {
+    if (!page || page.isClosed() || !this._browser) return false;
+    const selectedMode = mode || this._captchaMode || "slider";
+
+    try {
       const getAllContexts = () => {
         const contexts = [];
         try {
@@ -781,13 +1052,20 @@ export class AiAgentRunner {
         return contexts;
       };
 
-      // 2. Kiểm tra xem có xuất hiện DataDome Captcha hay không
       const checkCaptchaDetected = async () => {
         const contexts = getAllContexts();
         for (const ctx of contexts) {
           try {
-            const detected = await ctx.evaluate(() => {
+            const res = await ctx.evaluate(() => {
               const body = `${document.body ? document.body.innerText : ""} ${document.title || ""}`.toLowerCase();
+              
+              // Kiểm tra lỗi Proxy làm đứt kết nối tới máy chủ Captcha DataDome
+              const isNetworkDead = body.includes("didn't send any data") ||
+                                    body.includes("err_empty_response") ||
+                                    body.includes("err_connection_reset") ||
+                                    body.includes("err_connection_closed") ||
+                                    body.includes("captcha-delivery.com didn't send any data");
+
               const hasText = body.includes("why is this step needed") ||
                               body.includes("unusual activity from your device or network") ||
                               body.includes("verification required") ||
@@ -795,11 +1073,19 @@ export class AiAgentRunner {
                               body.includes("audio verification instead") ||
                               body.includes("captcha-delivery");
 
-              const hasContainer = !!document.querySelector("#ddv1-captcha-container, .datadome-container, iframe[src*='captcha-delivery'], #captcha__audio__button, #captcha__audio");
-              return hasText || hasContainer;
+              const hasContainer = !!document.querySelector("#ddv1-captcha-container, .datadome-container, iframe[src*='captcha-delivery'], #captcha__audio__button, #captcha__audio, #slider, .slider");
+              return { detected: hasText || hasContainer, isNetworkDead };
             });
-            if (detected) return true;
-          } catch {}
+
+            if (res.isNetworkDead) {
+              console.warn("\n⚠️ [PROXY ĐỨT KẾT NỐI CAPTCHA]: Proxy hiện tại làm đứt kết nối với máy chủ DataDome ('geo.captcha-delivery.com didn't send any data')!");
+              throw new Error("PROXY_CAPTCHA_NETWORK_ERROR: Proxy này bị đứt kết nối với máy chủ Captcha (geo.captcha-delivery.com). Đổi Proxy khác!");
+            }
+
+            if (res.detected) return true;
+          } catch (evalErr) {
+            if (evalErr.message.includes("PROXY_CAPTCHA_NETWORK_ERROR")) throw evalErr;
+          }
         }
         return false;
       };
@@ -807,10 +1093,36 @@ export class AiAgentRunner {
       const isCaptcha = await checkCaptchaDetected();
       if (!isCaptcha) return false;
 
-      console.log(`\n🧩 \x1b[33m[PHÁT HIỆN CAPTCHA]\x1b[0m Đang tự động giải thử thách DataDome / Geo Captcha bằng Âm thanh...`);
+      console.log(`\n🧩 \x1b[33m[PHÁT HIỆN CAPTCHA]\x1b[0m Đang tự động giải thử thách DataDome / Geo Captcha (Chế độ: ${selectedMode.toUpperCase()})...`);
+      console.log("⏳ [Chờ Render] Đang chờ 5s để iframe và hình ảnh Captcha nạp đầy đủ 100%...");
+      await this._safeSleep(5000);
 
-      if (mode === "audio" || mode === "auto") {
-        // BƯỚC 1: TÌM VÀ BẤM NÚT CHUYỂN SANG TAB AUDIO (ICON CÁI LOA)
+      // ==========================================
+      // CHẾ ĐỘ 1: GIẢI BẰNG OMOCAPTCHA SLIDER
+      // ==========================================
+      if (selectedMode === "slider" || selectedMode === "auto") {
+        const sliderSolved = await this._solveDataDomeSlider(page);
+        if (sliderSolved) {
+          // Chờ kiểm tra xem captcha đã biến mất chưa
+          const verifyStart = Date.now();
+          while (Date.now() - verifyStart < 6000) {
+            await this._safeSleep(1000);
+            if (!page || page.isClosed()) break;
+            const stillActive = await checkCaptchaDetected();
+            if (!stillActive) {
+              console.log("🎉 [OMOCaptcha Slider Passed] Xác minh Captcha thành công, tiếp tục quy trình!");
+              await this._safeSleep(1500);
+              return true;
+            }
+          }
+        }
+        console.log("-> [Fallback] Slider chưa hoàn tất, chuyển sang kiểm tra chế độ Âm thanh (Audio Tab)...");
+      }
+
+      // ==========================================
+      // CHẾ ĐỘ 2: GIẢI BẰNG DEEPGRAM MULTILINGUAL AUDIO
+      // ==========================================
+      if (selectedMode === "audio" || selectedMode === "auto" || selectedMode === "slider") {
         console.log("-> 1. Định vị và click nút chuyển sang chế độ Âm thanh (Audio Tab)...");
         let switchedToAudio = false;
 
@@ -856,7 +1168,6 @@ export class AiAgentRunner {
 
         await this._safeSleep(1500);
 
-        // BƯỚC 2: ĐĂNG KÝ LISTENER BẮT STREAM FILE ÂM THANH
         let capturedAudioBuf = null;
         let capturedAudioUrl = null;
         const audioListener = async (res) => {
@@ -872,7 +1183,6 @@ export class AiAgentRunner {
         };
         page.on("response", audioListener);
 
-        // BƯỚC 3: BẤM NÚT PLAY PHÁT ÂM THANH (CHỈ BẤM DUY NHẤT 1 LẦN ĐỂ TRÁNH BỊ PAUSE)
         console.log("-> 2. Bấm nút Play phát âm thanh đọc dãy số (Chỉ bấm 1 lần duy nhất)...");
         let hasTriggeredPlay = false;
 
@@ -881,7 +1191,6 @@ export class AiAgentRunner {
           if (hasTriggeredPlay) break;
           try {
             const played = await ctx.evaluate(() => {
-              // Tìm nút Play chuẩn của DataDome Audio Captcha
               const playCandidates = Array.from(document.querySelectorAll("div.audio-captcha-play-container button, #captcha__audio button, button[aria-label*='listen' i], button[aria-label*='play' i], button.play-button, button[class*='play'], div[class*='play'] button"));
               for (const b of playCandidates) {
                 if (b && !b.hidden && b.getBoundingClientRect().width > 0) {
@@ -902,7 +1211,6 @@ export class AiAgentRunner {
           } catch {}
         }
 
-        // Chờ tải stream audio về (tối đa 5s)
         const audioWaitStart = Date.now();
         while (Date.now() - audioWaitStart < 5000) {
           if (capturedAudioBuf) break;
@@ -986,7 +1294,7 @@ export class AiAgentRunner {
               }
             } catch {}
           }
-          // Chờ cho đến khi DataDome xác nhận xong và đóng container
+
           const verifyStart = Date.now();
           while (Date.now() - verifyStart < 8000) {
             await this._safeSleep(1000);
@@ -2447,15 +2755,21 @@ export class AiAgentRunner {
                 lower.includes("unable to verify your captcha response")
               );
 
+              // Kiểm tra lỗi Proxy chặn CDN GitHub (Please enable JS and disable any ad blocker)
+              const isJsBlocked = lower.includes("please enable js") ||
+                                  lower.includes("enable js and disable any ad blocker") ||
+                                  lower.includes("disable any ad blocker");
+
               return {
                 isSignupUrl: true,
                 hasEmailInput,
                 isCaptcha,
                 isRateLimited,
+                isJsBlocked,
                 currentUrl,
                 title: document.title,
               };
-            }).catch(() => ({ isSignupUrl: false, hasEmailInput: false, isCaptcha: false, isRateLimited: false }));
+            }).catch(() => ({ isSignupUrl: false, hasEmailInput: false, isCaptcha: false, isRateLimited: false, isJsBlocked: false }));
 
             // Nếu vẫn đang ở trang chủ, tiếp tục chờ hoặc điều hướng sang /signup
             if (!pageState.isSignupUrl) {
@@ -2466,8 +2780,13 @@ export class AiAgentRunner {
               continue;
             }
 
+            if (pageState.isJsBlocked) {
+              console.warn("\n⚠️ [PROXY CHẶN CDN GITHUB]: Proxy hiện tại đang chặn hoặc không tải được JavaScript/CDN của GitHub ('Please enable JS and disable any ad blocker')!");
+              throw new Error("PROXY_BLOCKED_CDN: Proxy này không tải được file JavaScript của GitHub. Hệ thống sẽ tự động chuyển sang Proxy khác!");
+            }
+
             if (pageState.isCaptcha) {
-              await this._handleDataDomeCaptcha(this._githubPage, "audio");
+              await this._handleDataDomeCaptcha(this._githubPage);
               await this._safeSleep(3000);
               continue;
             }
@@ -2608,7 +2927,7 @@ export class AiAgentRunner {
 
       console.log("-> 5. Gửi Form đăng ký và theo dõi chuyển sang trang xác thực OTP (Tự động click lại nếu kẹt)...");
       await this._actionDelay(1000, 1800);
-      
+
       let isMovedToVerify = false;
       const submitStartTime = Date.now();
       const maxSubmitWaitMs = 60000; // 60s cho bước chuyển tiếp form
@@ -2645,7 +2964,7 @@ export class AiAgentRunner {
         }).catch(() => ({ isCaptcha: false, isRateLimited: false }));
 
         if (pageCheck.isCaptcha) {
-          await this._handleDataDomeCaptcha(this._githubPage, "audio");
+          await this._handleDataDomeCaptcha(this._githubPage);
           await this._safeSleep(3000);
           continue;
         }
@@ -2658,8 +2977,8 @@ export class AiAgentRunner {
         const hasOtpElement = await this._githubPage.evaluate(() => {
           const bodyText = document.body ? document.body.innerText : "";
           const hasOtpInput = !!document.querySelector("#launch-code-0, input[id^='launch-code'], [data-testid='otp-digit'], input[name='otp'], input[autocomplete='one-time-code']");
-          const isOtpMsg = bodyText.includes("Enter code") || bodyText.includes("Check your email") || bodyText.includes("We sent a launch code") || bodyText.includes("We sent a code to");
-          return hasOtpInput || isOtpMsg;
+          const isOtpText = bodyText.includes("Enter code") || bodyText.includes("Check your email") || bodyText.includes("We sent a launch code") || bodyText.includes("We sent a code to");
+          return hasOtpInput || isOtpText;
         }).catch(() => false);
 
         // Kiểm tra xem đã chính thức rời khỏi signup chưa
@@ -2700,7 +3019,7 @@ export class AiAgentRunner {
       }
 
       // 5. Chờ chuyển sang trang Nhập OTP (Hỗ trợ nếu có bước giải Captcha)
-      console.log("\n[Bước 4] Đang theo dõi trạng thái màn hình OTP (Nếu có Captcha, hãy hoàn tất giải trên trình duyệt)...");
+      console.log("\n[Bước 4] Đang theo dõi trạng thái màn hình OTP (Nếu có Captcha, hệ thống tự động giải)...");
       let isOtpScreenReady = false;
       const maxOtpWaitTime = 90000; // 90s
       const otpWaitStart = Date.now();
@@ -2711,7 +3030,7 @@ export class AiAgentRunner {
         const currentUrl = this._githubPage.url();
 
         // Tự động kiểm tra và xử lý nếu gặp DataDome / Geo Captcha / Arkose Labs
-        await this._handleDataDomeCaptcha(this._githubPage, "audio");
+        await this._handleDataDomeCaptcha(this._githubPage);
 
         // Kiểm tra lại xem có bị hạn chế IP không
         const checkRestricted = await this._githubPage.evaluate(() => {
@@ -2810,6 +3129,7 @@ async function main() {
   let proxyMode = "direct"; // Mặc định chạy Direct máy tính, không chờ proxy
   let proxyGroup = "vn";
   let emailService = process.env.EMAIL_SERVICE || "gmail";
+  let captchaMode = process.env.CAPTCHA_MODE || "slider";
 
   for (const arg of args) {
     if (arg === "--rotate" || arg === "-r") {
@@ -2828,10 +3148,16 @@ async function main() {
       emailService = arg.replace(/^--email=/, "").trim();
     } else if (arg.startsWith("--group=")) {
       proxyGroup = arg.replace(/^--group=/, "").trim();
+    } else if (arg.startsWith("--captcha=")) {
+      captchaMode = arg.replace(/^--captcha=/, "").trim();
+    } else if (arg === "--slider") {
+      captchaMode = "slider";
+    } else if (arg === "--audio") {
+      captchaMode = "audio";
     }
   }
 
-  const runner = new AiAgentRunner({ proxyMode, proxyGroup, emailService });
+  const runner = new AiAgentRunner({ proxyMode, proxyGroup, emailService, captchaMode });
   try {
     await runner.runFullE2EWorkflow({
       saveSecrets: true,
@@ -2847,3 +3173,4 @@ async function main() {
 if (process.argv[1] && (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/")}` || process.argv[1].endsWith("ai_agent_runner.js"))) {
   main();
 }
+

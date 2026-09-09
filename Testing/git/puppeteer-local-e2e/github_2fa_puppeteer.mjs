@@ -40,6 +40,53 @@ async function clickVisibleText(page, text) {
   return clicked
 }
 
+async function closeOverlaysAndModals(page) {
+  try {
+    await page.evaluate(() => {
+      // 1. Tìm và click các nút Close / Cancel trong modal dialog
+      const closeSelectors = [
+        "dialog button[aria-label='Close']",
+        "dialog .Button--close",
+        "dialog [data-action*='close']",
+        "dialog .close-button",
+        ".Overlay-closeButton",
+        "button[aria-label='Close']",
+        "[data-testid='close-button']",
+        "button[data-action='click:two-factor-setup-verification#closeModal']",
+        "details[open] summary",
+        "dialog button"
+      ];
+
+      for (const sel of closeSelectors) {
+        const btns = document.querySelectorAll(sel);
+        for (const btn of btns) {
+          const txt = (btn.innerText || btn.textContent || btn.getAttribute("aria-label") || "").trim().toLowerCase();
+          if (txt === "close" || txt === "cancel" || txt === "đóng" || btn.getAttribute("aria-label") === "Close") {
+            btn.click();
+            break;
+          }
+        }
+      }
+
+      // 2. Đóng thẻ <dialog open> trực tiếp nếu có
+      const openDialogs = document.querySelectorAll("dialog[open]");
+      openDialogs.forEach((d) => {
+        try { d.close(); } catch {}
+      });
+
+      // 3. Ẩn backdrop / modal overlay nếu còn che màn hình
+      const backdrops = document.querySelectorAll(".Overlay-backdrop, [data-component='backdrop']");
+      backdrops.forEach((b) => {
+        try { b.remove(); } catch {}
+      });
+    });
+
+    // 4. Nhấn phím Escape để hủy mọi popup/dialog còn mở
+    await page.keyboard.press("Escape");
+    await sleep(500);
+  } catch {}
+}
+
 async function waitForManualDeviceVerification(page) {
   const text = await bodyText(page)
   if (!page.url().includes("/sessions/verified-device") && !text.includes("Device verification")) return
@@ -157,6 +204,11 @@ async function extractSetupKey(page) {
     return match ? match[1].replace(/[\s-]/g, "") : null
   })
 
+  // ĐÓNG MODAL / POPUP SETUP KEY NGAY SAU KHI LẤY KEY ĐỂ KHÔNG BỊ CHE Ô INPUT OTP
+  console.log("-> Đang đóng Modal / Dialog Setup Key để lộ ô nhập mã OTP...")
+  await closeOverlaysAndModals(page)
+  await sleep(1_000)
+
   if (!key) throw new Error("Không lấy được setup key từ GitHub.")
   return key.toUpperCase()
 }
@@ -187,7 +239,7 @@ async function enableTwoFactor(page, browser) {
   await clickVisibleText(page, "Continue")
   await sleep(1_500)
 
-  // Lấy Setup Secret Key từ GitHub
+  // Lấy Setup Secret Key từ GitHub (đã tích hợp tự động đóng modal/dialog sau khi lấy)
   const setupKey = await extractSetupKey(page)
   console.log(`Đã lấy setup key từ GitHub: ${setupKey}`)
 
@@ -195,8 +247,9 @@ async function enableTwoFactor(page, browser) {
   const code = await getTotpFrom2faPage(browser, setupKey)
   console.log(`Đã sinh mã TOTP xác thực: ${code}`)
 
-  // Focus lại tab GitHub
+  // Focus lại tab GitHub & dọn dẹp modal nếu còn sót
   await page.bringToFront()
+  await closeOverlaysAndModals(page)
   await sleep(500)
 
   // Danh sách selector định vị ô nhập mã TOTP của GitHub
@@ -229,7 +282,8 @@ async function enableTwoFactor(page, browser) {
   }
 
   if (!otpInput) {
-    // Thử đợi bất kỳ ô input text nào trong form verify hoặc setup
+    // Thử đóng modal lại một lần nữa trước khi tìm kiếm fallback
+    await closeOverlaysAndModals(page)
     try {
       otpInput = await page.waitForSelector('two-factor-setup-verification input, input[placeholder="XXXXXX"], input[name="otp"]', { visible: true, timeout: 10_000 })
     } catch {}
@@ -238,6 +292,13 @@ async function enableTwoFactor(page, browser) {
   if (!otpInput) {
     throw new Error("Không tìm thấy ô nhập mã xác minh TOTP trên giao diện GitHub.")
   }
+
+  // Cuộn ô input vào giữa màn hình và focus
+  await otpInput.evaluate((el) => {
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.focus();
+  });
+  await sleep(300);
 
   // Focus và điền mã OTP chuẩn xác
   await otpInput.click({ clickCount: 3 })
