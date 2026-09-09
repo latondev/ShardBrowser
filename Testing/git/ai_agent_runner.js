@@ -2908,7 +2908,17 @@ export class AiAgentRunner {
             }).catch(() => {});
           }
 
-          await this._actionDelay(2000, 3000);
+          // CHỜ NETWORK ỔN ĐỊNH & DOM NẠP HOÀN TOÀN TRƯỚC KHI QUÉT TRẠNG THÁI (Tránh phát hiện nhầm khi đang quay tải)
+          console.log("⏳ [Đang Tải Form] Chờ trang đăng ký tải xong tài nguyên (Network & DOM Render)...");
+          try {
+            await Promise.race([
+              this._githubPage.waitForSelector(".signups-rebrand__container-content, h1.signups-rebrand__container-h1, #email, input[name='user[email]']", { visible: true, timeout: 15000 }),
+              this._githubPage.waitForFunction(() => document.readyState === "complete", { timeout: 10000 }),
+              this._safeSleep(4000)
+            ]);
+          } catch {}
+
+          await this._actionDelay(1000, 2000);
           await this._detectAndCloseOverlays(this._githubPage);
 
           // Polling chờ ô nhập password/email trong trang signup hoặc giải Captcha (tối đa 90s)
@@ -2961,9 +2971,11 @@ export class AiAgentRunner {
                 return r.width > 120 && r.height > 120 && !el.hidden && window.getComputedStyle(el).display !== 'none';
               });
 
-              const isCaptcha = !isRateLimited && (
+              // CHỈ COI LÀ CAPTCHA KHI CÓ IFRAME CAPTCHA THẬT SỰ HIỂN THỊ (>120px) HOẶC CÓ TEXT KÉO SLIDER RÕ RÀNG
+              const isCaptcha = !isRateLimited && !hasEmailInput && (
                 visibleCaptchaIframe ||
-                (!hasEmailInput && (lower.includes("slide right to secure your access") || lower.includes("why is this step needed") || lower.includes("geo.captcha-delivery.com")))
+                lower.includes("slide right to secure your access") ||
+                lower.includes("why is this step needed")
               );
 
               // Kiểm tra lỗi Proxy chặn CDN GitHub (Please enable JS and disable any ad blocker)
