@@ -731,7 +731,7 @@ export class AiAgentRunner {
     for (const token of witTokens) {
       try {
         const resp = await axios.post("https://api.wit.ai/speech?v=20230215", audioBuffer, {
-          headers: {
+        headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": mimeType,
           },
@@ -770,70 +770,93 @@ export class AiAgentRunner {
     if (!page || page.isClosed() || !this._browser) return false;
 
     try {
-      // 1. Kiểm tra các tab / target con có URL captcha-delivery
-      const targets = this._browser.targets();
-      let captchaTarget = targets.find(t => t.url().includes("captcha-delivery.com") || t.url().includes("geo.captcha") || t.url().includes("datadome"));
-      let captchaPage = null;
+      // 1. Thu thập tất cả contexts khả thi (page chính, các iframes, các popup targets)
+      const getAllContexts = () => {
+        const contexts = [];
+        try {
+          if (page && !page.isClosed()) contexts.push(page);
+          const frames = page.frames ? page.frames() : [];
+          for (const f of frames) contexts.push(f);
+        } catch {}
+        return contexts;
+      };
 
-      if (captchaTarget) {
-        captchaPage = await captchaTarget.page().catch(() => null);
-      }
-
-      // 2. Kiểm tra các iframe trong trang chính
-      const frames = page.frames();
-      let captchaFrame = frames.find(f => f.url().includes("captcha-delivery.com") || f.url().includes("geo.captcha") || f.url().includes("arkoselabs") || f.url().includes("datadome"));
-
-      const ctx = captchaPage || captchaFrame || page;
-
-      // 3. Kiểm tra các dấu hiệu nhận biết DataDome Captcha
-      const captchaInfo = await ctx.evaluate(() => {
-        const body = (document.body ? document.body.innerText : "") + " " + (document.title || "");
-        const lower = body.toLowerCase();
-        const hasText = lower.includes("why is this step needed") ||
-                        lower.includes("we detected unusual activity from your device or network") ||
-                        lower.includes("verification required") ||
-                        lower.includes("slide right to secure your access") ||
-                        lower.includes("captcha-delivery");
-
-        const hasAudioBtn = !!(document.querySelector("#captcha__audio__button") || document.querySelector("[aria-label*='audio']"));
-        const hasPuzzleBtn = !!(document.querySelector("#captcha__puzzle__button") || document.querySelector("[aria-label*='visual']"));
-        const hasContainer = !!(document.querySelector("#ddv1-captcha-container") || document.querySelector(".datadome-container") || document.querySelector("iframe[src*='captcha-delivery']"));
-
-        return {
-          isDetected: hasText || hasAudioBtn || hasPuzzleBtn || hasContainer,
-          hasAudioBtn,
-        };
-      }).catch(() => ({ isDetected: false, hasAudioBtn: false }));
-
-      if (!captchaTarget && !captchaFrame && !captchaInfo.isDetected) {
-        return false;
-      }
-
-      console.log(`\n🧩 \x1b[33m[PHÁT HIỆN CAPTCHA]\x1b[0m Hệ thống phát hiện thử thách xác minh DataDome / Geo Captcha!`);
-
-      // NẾU CHẾ ĐỘ AUDIO ĐƯỢC BẬT (Mặc định): Tự động giải bằng Audio AI STT
-      if (mode === "audio" || mode === "auto") {
-        console.log("-> 1. Bấm nút chuyển sang chế độ Âm thanh (Audio Voice Captcha) bằng chuột thật...");
-
-        for (let attempt = 0; attempt < 3; attempt++) {
+      // 2. Kiểm tra xem có xuất hiện DataDome Captcha hay không
+      const checkCaptchaDetected = async () => {
+        const contexts = getAllContexts();
+        for (const ctx of contexts) {
           try {
-            const audioBtn = await ctx.$("#captcha__audio__button, button.audio-button, button.audio-btn, button[data-type='audio'], [aria-label*='audio' i], [title*='audio' i]");
-            if (audioBtn) {
-              const box = await audioBtn.boundingBox();
-              if (box) {
-                await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
-                await this._safeSleep(200 + Math.floor(Math.random() * 150));
-              }
-              await audioBtn.click({ delay: 70 });
-              break;
-            }
+            const detected = await ctx.evaluate(() => {
+              const body = `${document.body ? document.body.innerText : ""} ${document.title || ""}`.toLowerCase();
+              const hasText = body.includes("why is this step needed") ||
+                              body.includes("unusual activity from your device or network") ||
+                              body.includes("verification required") ||
+                              body.includes("slide right to secure your access") ||
+                              body.includes("audio verification instead") ||
+                              body.includes("captcha-delivery");
+
+              const hasContainer = !!document.querySelector("#ddv1-captcha-container, .datadome-container, iframe[src*='captcha-delivery'], #captcha__audio__button, #captcha__audio");
+              return hasText || hasContainer;
+            });
+            if (detected) return true;
           } catch {}
+        }
+        return false;
+      };
+
+      const isCaptcha = await checkCaptchaDetected();
+      if (!isCaptcha) return false;
+
+      console.log(`\n🧩 \x1b[33m[PHÁT HIỆN CAPTCHA]\x1b[0m Đang tự động giải thử thách DataDome / Geo Captcha bằng Âm thanh...`);
+
+      if (mode === "audio" || mode === "auto") {
+        // BƯỚC 1: TÌM VÀ BẤM NÚT CHUYỂN SANG TAB AUDIO (ICON CÁI LOA)
+        console.log("-> 1. Định vị và click nút chuyển sang chế độ Âm thanh (Audio Tab)...");
+        let switchedToAudio = false;
+
+        for (let attempt = 1; attempt <= 5; attempt++) {
+          const contexts = getAllContexts();
+          for (const ctx of contexts) {
+            try {
+              const clicked = await ctx.evaluate(() => {
+                const specificBtns = document.querySelectorAll("#captcha__audio__button, #captcha__audio, button.audio-button, button.audio-btn, button[data-type='audio'], [aria-label*='audio' i], [title*='audio' i], [aria-label*='sound' i]");
+                for (const b of specificBtns) {
+                  if (b && !b.hidden && b.getBoundingClientRect().width > 0) {
+                    b.scrollIntoView({ behavior: "smooth", block: "center" });
+                    b.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+                    b.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+                    b.click();
+                    return true;
+                  }
+                }
+                const headerButtons = Array.from(document.querySelectorAll("header button, div[class*='header'] button, div[class*='tab'] button, div[class*='toggle'] button, div[role='tablist'] button, div[role='tablist'] [role='tab']"));
+                if (headerButtons.length >= 2) {
+                  const audioBtn = headerButtons[1];
+                  if (audioBtn) {
+                    audioBtn.scrollIntoView({ behavior: "smooth", block: "center" });
+                    audioBtn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+                    audioBtn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+                    audioBtn.click();
+                    return true;
+                  }
+                }
+                return false;
+              });
+
+              if (clicked) {
+                switchedToAudio = true;
+                break;
+              }
+            } catch {}
+          }
+
+          if (switchedToAudio) break;
           await this._safeSleep(1000);
         }
 
-        await this._safeSleep(2000);
+        await this._safeSleep(1500);
 
-        // Đăng ký listener bắt trọn vẹn file âm thanh khi trình duyệt phát
+        // BƯỚC 2: ĐĂNG KÝ LISTENER BẮT STREAM FILE ÂM THANH
         let capturedAudioBuf = null;
         let capturedAudioUrl = null;
         const audioListener = async (res) => {
@@ -843,29 +866,39 @@ export class AiAgentRunner {
             if (u.includes("/captcha/audio") || u.includes(".wav") || u.includes(".mp3") || ct.includes("audio/")) {
               capturedAudioUrl = u;
               const buf = await res.buffer().catch(() => null);
-              if (buf && buf.length > 500) {
-                capturedAudioBuf = buf;
-              }
+              if (buf && buf.length > 500) capturedAudioBuf = buf;
             }
           } catch {}
         };
         page.on("response", audioListener);
 
-        // Bấm nút Play phát âm thanh bằng chuột thật
-        console.log("-> 2. Bấm nút phát âm thanh đọc dãy số bằng chuột thật...");
-        try {
-          const playBtn = await ctx.$("div.audio-captcha-play-container > button, #captcha__audio button, button[aria-label*='Listen' i], button[aria-label*='Play' i], button.play-button");
-          if (playBtn) {
-            const box = await playBtn.boundingBox();
-            if (box) {
-              await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
-              await this._safeSleep(200 + Math.floor(Math.random() * 150));
-            }
-            await playBtn.click({ delay: 80 });
-          }
-        } catch {}
+        // BƯỚC 3: BẤM NÚT PLAY PHÁT ÂM THANH
+        console.log("-> 2. Bấm nút Play phát âm thanh đọc dãy số...");
+        for (let attempt = 1; attempt <= 4; attempt++) {
+          const contexts = getAllContexts();
+          for (const ctx of contexts) {
+            try {
+              const played = await ctx.evaluate(() => {
+                const playCandidates = Array.from(document.querySelectorAll("div.audio-captcha-play-container button, #captcha__audio button, button[aria-label*='listen' i], button[aria-label*='play' i], button.play-button, button[class*='play'], div[class*='play'] button"));
+                for (const b of playCandidates) {
+                  if (b && !b.hidden && b.getBoundingClientRect().width > 0) {
+                    b.scrollIntoView({ behavior: "smooth", block: "center" });
+                    b.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+                    b.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+                    b.click();
+                    return true;
+                  }
+                }
+                return false;
+              });
 
-        // Chờ stream audio tải về (tối đa 4s)
+              if (played) break;
+            } catch {}
+          }
+          if (capturedAudioBuf) break;
+          await this._safeSleep(1000);
+        }
+
         const audioWaitStart = Date.now();
         while (Date.now() - audioWaitStart < 4000) {
           if (capturedAudioBuf) break;
@@ -873,96 +906,87 @@ export class AiAgentRunner {
         }
         page.off("response", audioListener);
 
-        // DataDome yêu cầu đợi phát hết âm thanh (khoảng 3.5s - 4.5s) trước khi gõ phím
-        console.log("⏳ [Nghe Âm Thanh] Chờ phát trọn vẹn dãy số trên trình duyệt...");
+        console.log("⏳ [Nghe Âm Thanh] Đang lắng nghe trọn vẹn dãy số từ trình duyệt...");
         await this._safeSleep(3800 + Math.floor(Math.random() * 800));
 
-        // Fallback nếu listener không bắt được buffer
         if (!capturedAudioBuf) {
-          const audioUrl = await ctx.evaluate(() => {
-            const audioEl = document.querySelector("audio");
-            if (audioEl && audioEl.src) return audioEl.src;
-            const sourceEl = document.querySelector("audio source");
-            if (sourceEl && sourceEl.src) return sourceEl.src;
-            return null;
-          }).catch(() => null);
-
-          if (audioUrl) {
+          const contexts = getAllContexts();
+          for (const ctx of contexts) {
             try {
-              const resp = await axios.get(audioUrl, { responseType: "arraybuffer", timeout: 8000 });
-              if (resp.data) capturedAudioBuf = Buffer.from(resp.data);
+              const audioUrl = await ctx.evaluate(() => {
+                const a = document.querySelector("audio");
+                if (a && a.src) return a.src;
+                const s = document.querySelector("audio source");
+                if (s && s.src) return s.src;
+                return null;
+              });
+              if (audioUrl) {
+                const resp = await axios.get(audioUrl, { responseType: "arraybuffer", timeout: 8000 }).catch(() => null);
+                if (resp?.data) {
+                  capturedAudioBuf = Buffer.from(resp.data);
+                  break;
+                }
+              }
             } catch {}
           }
         }
 
         let recognizedDigits = null;
         if (capturedAudioBuf) {
-          console.log("🤖 [AI Speech-to-Text] Đang nhận diện dãy số qua Deepgram Nova-3 Multilingual...");
+          console.log("🤖 [AI Speech-to-Text] Đang trích xuất dãy số qua mô hình Deepgram Nova-3 Multilingual...");
           recognizedDigits = await this._recognizeSpeechFromBuffer(capturedAudioBuf, capturedAudioUrl || "audio.wav");
         }
 
-        if (recognizedDigits) {
-          console.log(`🎯 [AI Speech-to-Text] Đã nhận diện thành công dãy số: [ \x1b[32m${recognizedDigits}\x1b[0m ]`);
-          console.log(`-> Đang điền tuần tự các ô số [${recognizedDigits}] vào form xác thực...`);
+        if (recognizedDigits && recognizedDigits.length >= 3) {
+          console.log(`🎯 [AI Speech-to-Text] Đã trích xuất thành công: [ \x1b[32m${recognizedDigits}\x1b[0m ]`);
+          console.log(`-> Điền mã [${recognizedDigits}] vào form xác thực và gửi...`);
 
-          const allInputs = await ctx.$$("input[type='text'], input[type='tel'], input[type='number'], #ddv1-captcha-container input, #captcha__audio input");
-          
-          if (allInputs.length > 0) {
-            const firstInput = allInputs[0];
-            const firstBox = await firstInput.boundingBox().catch(() => null);
-            if (firstBox) {
-              await this._humanMouseMove(page, firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
-              await this._safeSleep(150);
-            }
-            await firstInput.click({ delay: 50 }).catch(() => {});
-            await this._safeSleep(200);
-
-            if (allInputs.length >= 6) {
-              for (let i = 0; i < recognizedDigits.length && i < allInputs.length; i++) {
-                const digit = recognizedDigits[i];
-                const inp = allInputs[i];
-
-                const box = await inp.boundingBox().catch(() => null);
-                if (box) {
-                  await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
-                  await this._safeSleep(60 + Math.floor(Math.random() * 50));
+          const contexts = getAllContexts();
+          for (const ctx of contexts) {
+            try {
+              const filled = await ctx.evaluate((digits) => {
+                const inputs = Array.from(document.querySelectorAll("input[type='text'], input[type='tel'], input[type='number'], #captcha__audio input, input[name*='captcha'], input[id*='audio']"));
+                if (inputs.length === 0) return false;
+                if (inputs.length >= 6) {
+                  for (let i = 0; i < digits.length && i < inputs.length; i++) {
+                    const inp = inputs[i];
+                    inp.focus();
+                    inp.value = digits[i];
+                    inp.dispatchEvent(new Event("input", { bubbles: true }));
+                    inp.dispatchEvent(new Event("change", { bubbles: true }));
+                  }
+                } else {
+                  const mainInput = inputs[0];
+                  mainInput.focus();
+                  mainInput.value = digits;
+                  mainInput.dispatchEvent(new Event("input", { bubbles: true }));
+                  mainInput.dispatchEvent(new Event("change", { bubbles: true }));
                 }
-                await inp.click({ delay: 40 }).catch(() => {});
-                await this._safeSleep(80 + Math.floor(Math.random() * 60));
+                const submitBtns = Array.from(document.querySelectorAll(".audio-captcha-submit-button, div.audio-captcha-submit-container > button, #captcha__audio button[type='submit'], [aria-label*='verify' i], button[type='submit']"));
+                for (const btn of submitBtns) {
+                  btn.scrollIntoView({ behavior: "smooth", block: "center" });
+                  btn.click();
+                  return true;
+                }
+                const form = document.querySelector("#captcha__audio form, form");
+                if (form) {
+                  form.requestSubmit();
+                  return true;
+                }
+                return true;
+              }, recognizedDigits);
 
-                await page.keyboard.press(digit);
-                await this._safeSleep(150 + Math.floor(Math.random() * 120));
+              if (filled) {
+                console.log("✅ [Captcha Submitted] Đã điền mã và gửi xác nhận thành công!");
+                break;
               }
-            } else {
-              for (const digit of recognizedDigits) {
-                await page.keyboard.press(digit);
-                await this._safeSleep(180 + Math.floor(Math.random() * 100));
-              }
-            }
+            } catch {}
           }
-
-          await this._safeSleep(1500 + Math.floor(Math.random() * 700));
-
-          console.log("-> Bấm nút 'Verify' bằng chuột thật để hoàn tất xác thực...");
-          try {
-            const submitBtn = await ctx.$(".audio-captcha-submit-button, div.audio-captcha-submit-container > button, #captcha__audio button[type='submit'], [aria-label='Verify'], button.audio-captcha-submit, button[type='submit']");
-            if (submitBtn) {
-              const box = await submitBtn.boundingBox().catch(() => null);
-              if (box) {
-                await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
-                await this._safeSleep(300 + Math.floor(Math.random() * 200));
-              }
-              await submitBtn.click({ delay: 90 });
-              console.log("✅ [Captcha Submitted] Đã gửi mã xác nhận âm thanh!");
-            }
-          } catch {}
-
           await this._safeSleep(4000);
           return true;
         }
       }
 
-      // Dự phòng: Nếu tự động giải chưa thành công hoặc mode = "manual", chờ người dùng giải trên màn hình
       console.log("💡 [Chờ Thủ Công] Đang ở màn hình xác thực DataDome (Bạn có thể giải tiếp trên màn hình trình duyệt)...");
       const timeoutMs = 5 * 60 * 1000;
       const startedAt = Date.now();
@@ -971,15 +995,7 @@ export class AiAgentRunner {
       while (Date.now() - startedAt < timeoutMs) {
         await this._safeSleep(1000);
         if (!page || page.isClosed() || !this._browser) return false;
-        
-        const isStillThere = await ctx.evaluate(() => {
-          const body = `${document.body?.innerText || ""} ${document.title || ""}`.toLowerCase();
-          return body.includes("why is this step needed") ||
-                 body.includes("we detected unusual activity from your device or network") ||
-                 body.includes("verification required") ||
-                 body.includes("slide right to secure your access") ||
-                 !!document.querySelector("#ddv1-captcha-container, .datadome-container, iframe[src*='captcha-delivery']");
-        }).catch(() => false);
+        const isStillThere = await checkCaptchaDetected();
 
         if (isStillThere) {
           clearChecks = 0;
