@@ -218,6 +218,9 @@ const LAUNCHER_API_TOKEN = process.env.LAUNCHER_API_TOKEN || DEFAULT_LAUNCHER_CO
 // 2. CLASS RUNNER CHÍNH
 // ==============================================================================
 export class AiAgentRunner {
+  // Static Blacklist để tự động loại bỏ các Proxy đã bị GitHub Rate-Limit / Block
+  static _blacklistedProxyKeys = new Set();
+
   // Private / Protected Properties
   _launcherApiUrl = "";
   _launcherToken = "";
@@ -383,13 +386,17 @@ export class AiAgentRunner {
     return list;
   }
 
-  // Cơ chế xáo trộn ngẫu nhiên và kiểm tra proxy sống siêu tốc
+  // Cơ chế xáo trộn ngẫu nhiên và kiểm tra proxy sống siêu tốc (Loại trừ Proxy đã dính Rate Limit)
   async _findFastLiveProxy(candidateList, maxTests = 35) {
     if (!Array.isArray(candidateList) || candidateList.length === 0) return null;
 
+    // Lọc bỏ các proxy đã bị GitHub Rate Limit / Block trong phiên
+    const cleanCandidates = candidateList.filter(p => !AiAgentRunner._blacklistedProxyKeys.has(`${p.host}:${p.port}`));
+    const pool = cleanCandidates.length > 0 ? cleanCandidates : candidateList;
+
     // Nếu chỉ có đúng 1 proxy, kiểm tra trực tiếp và dùng luôn
-    if (candidateList.length === 1) {
-      const single = candidateList[0];
+    if (pool.length === 1) {
+      const single = pool[0];
       console.log(`🌐 [Proxy Pool] Có 1 Proxy duy nhất [${single.host}:${single.port}]. Đang kiểm tra kết nối...`);
       const res = await checkProxyFastAndLive(single, 3000);
       single._verifiedLatency = (res && res.latency) ? res.latency : 0;
@@ -397,8 +404,8 @@ export class AiAgentRunner {
       return single;
     }
 
-    console.log(`🌐 [Proxy Pool] Tìm thấy ${candidateList.length} proxy khả dụng. Bắt đầu xáo trộn ngẫu nhiên và kiểm tra độ trễ...`);
-    const shuffled = [...candidateList].sort(() => Math.random() - 0.5);
+    console.log(`🌐 [Proxy Pool] Tìm thấy ${pool.length} proxy khả dụng (Đã loại ${candidateList.length - pool.length} proxy rate-limit). Bắt đầu xáo trộn ngẫu nhiên và kiểm tra độ trễ...`);
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
     const limit = Math.min(shuffled.length, maxTests);
 
     let bestAliveCandidate = null;
@@ -2924,25 +2931,24 @@ export class AiAgentRunner {
               const hasPasswordInput = !!document.querySelector("#password, input[name='user[password]']");
               const hasEmailInput = signupEmailInput || hasPasswordInput;
 
-              // Kiểm tra DataDome Geo Captcha / Verification Required
-              const isCaptcha = lower.includes("why is this step needed") ||
-                                lower.includes("we detected unusual activity from your device or network") ||
-                                lower.includes("slide right to secure your access") ||
-                                lower.includes("verification required") ||
-                                lower.includes("geo.captcha-delivery.com") ||
-                                !!document.querySelector("#ddv1-captcha-container") ||
-                                !!document.querySelector("#captcha__audio__button") ||
-                                !!document.querySelector("iframe[src*='captcha-delivery']") ||
-                                !!document.querySelector("iframe[src*='geo.captcha']");
+              // 1. Kiểm tra Hard Block / Rate Limit (ƯU TIÊN HÀNG ĐẦU)
+              const isRateLimited = lower.includes("access is temporarily restricted") ||
+                                    lower.includes("access restricted") ||
+                                    lower.includes("temporarily restricted") ||
+                                    lower.includes("reasons may include") ||
+                                    lower.includes("need help? submit feedback") ||
+                                    lower.includes("truy cập tạm thời bị hạn chế") ||
+                                    lower.includes("tạm thời hạn chế truy cập") ||
+                                    lower.includes("unable to verify your captcha response");
 
-              // Chỉ coi là Rate Limit khi thực sự bị khóa cứng không có Captcha solver
-              const isRateLimited = !isCaptcha && (
-                lower.includes("truy cập tạm thời bị hạn chế") ||
-                lower.includes("tạm thời hạn chế truy cập") ||
-                lower.includes("access is temporarily restricted") ||
-                lower.includes("access restricted") ||
-                lower.includes("temporarily restricted") ||
-                lower.includes("unable to verify your captcha response")
+              // 2. Kiểm tra DataDome Geo Captcha (Chỉ khi có khung Captcha thực sự và KHÔNG PHẢI là Hard Block)
+              const hasCaptchaIframe = !!document.querySelector("#ddv1-captcha-container, iframe[src*='captcha-delivery'], iframe[src*='geo.captcha'], #captcha__audio__button, #captcha__slider");
+              const isCaptcha = !isRateLimited && (
+                hasCaptchaIframe ||
+                lower.includes("why is this step needed") ||
+                lower.includes("slide right to secure your access") ||
+                lower.includes("verification required") ||
+                lower.includes("geo.captcha-delivery.com")
               );
 
               // Kiểm tra lỗi Proxy chặn CDN GitHub (Please enable JS and disable any ad blocker)
@@ -2970,7 +2976,18 @@ export class AiAgentRunner {
               continue;
             }
 
+            if (pageState.isRateLimited) {
+              if (this._activeProxy) {
+                AiAgentRunner._blacklistedProxyKeys.add(`${this._activeProxy.host}:${this._activeProxy.port}`);
+                console.warn(`\n⚠️ [CẢNH BÁO RATE-LIMIT]: IP Proxy [${this._activeProxy.host}:${this._activeProxy.port}] đã bị GitHub đưa vào blacklist tạm thời!`);
+              }
+              throw new Error("GITHUB_RATE_LIMITED: GitHub tạm thời hạn chế truy cập từ IP này (Access is temporarily restricted). Hệ thống tự động chuyển sang Proxy khác!");
+            }
+
             if (pageState.isJsBlocked) {
+              if (this._activeProxy) {
+                AiAgentRunner._blacklistedProxyKeys.add(`${this._activeProxy.host}:${this._activeProxy.port}`);
+              }
               console.warn("\n⚠️ [PROXY CHẶN CDN GITHUB]: Proxy hiện tại đang chặn hoặc không tải được JavaScript/CDN của GitHub ('Please enable JS and disable any ad blocker')!");
               throw new Error("PROXY_BLOCKED_CDN: Proxy này không tải được file JavaScript của GitHub. Hệ thống sẽ tự động chuyển sang Proxy khác!");
             }
@@ -2979,11 +2996,6 @@ export class AiAgentRunner {
               await this._handleDataDomeCaptcha(this._githubPage);
               await this._safeSleep(3000);
               continue;
-            }
-
-            if (pageState.isRateLimited) {
-              console.warn("\n⚠️ [CẢNH BÁO RATE-LIMIT]: IP hiện tại đang bị GitHub hạn chế tạm thời!");
-              throw new Error("GITHUB_RATE_LIMITED: GitHub tạm thời hạn chế truy cập từ IP này (Rate Limit). Vui lòng đổi Proxy mới!");
             }
 
             if (pageState.hasEmailInput) {
