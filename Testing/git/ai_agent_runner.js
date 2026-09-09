@@ -840,7 +840,7 @@ export class AiAgentRunner {
     return false;
   }
 
-  // Điền mã OTP vào GitHub bằng sự kiện bàn phím thật (isTrusted: true)
+  // Điền mã OTP vào GitHub bằng sự kiện bàn phím thật (isTrusted: true) và bấm Continue nếu có
   async _fillOtpDigits(page, otpCode) {
     if (!page || page.isClosed() || !otpCode) return false;
     const cleanCode = String(otpCode).trim();
@@ -856,10 +856,20 @@ export class AiAgentRunner {
         await firstEl.click();
         await this._safeSleep(200);
 
-        // Gõ tuần tự 6 số bằng bàn phím người thật (mỗi ký tự có delay ngẫu nhiên 60-120ms)
-        for (const char of cleanCode) {
-          await page.keyboard.type(char, { delay: this._randomDelay(60, 120) });
-          await this._safeSleep(50);
+        // Kiểm tra xem có bao nhiêu ô launch-code (thường là 6 hoặc 8 ô)
+        const inputs = await page.$$("input[id^='launch-code-']");
+        if (inputs && inputs.length > 0) {
+          for (let i = 0; i < Math.min(cleanCode.length, inputs.length); i++) {
+            await inputs[i].click({ clickCount: 3 });
+            await inputs[i].type(cleanCode[i], { delay: this._randomDelay(40, 80) });
+            await this._safeSleep(30);
+          }
+        } else {
+          // Gõ tuần tự bằng bàn phím người thật
+          for (const char of cleanCode) {
+            await page.keyboard.type(char, { delay: this._randomDelay(60, 120) });
+            await this._safeSleep(50);
+          }
         }
       } else {
         // Fallback qua single input
@@ -870,11 +880,55 @@ export class AiAgentRunner {
         }
       }
 
+      await this._safeSleep(800);
+
+      // Bấm nút Continue hoặc submit form xác thực nếu có
+      await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll("button, input[type='submit']"));
+        for (const b of buttons) {
+          const txt = (b.innerText || b.textContent || b.value || "").trim().toLowerCase();
+          if (txt === "continue" || txt === "submit" || txt.includes("verify")) {
+            b.scrollIntoView({ behavior: "smooth", block: "center" });
+            b.click();
+            return true;
+          }
+        }
+        const form = document.querySelector("form[action*='verifications'], form[action*='verify']");
+        if (form) {
+          form.requestSubmit();
+          return true;
+        }
+        return false;
+      }).catch(() => {});
+
       await this._actionDelay(1200, 2000);
       return true;
     } catch {
       return false;
     }
+  }
+
+  // Lắng nghe mã OTP xác nhận từ dịch vụ email đang kích hoạt (Hotmail Graph, UnlimitMail, Gmail, Mail.tm)
+  async _fetchEmailVerificationCode(timeoutSec = 90, intervalSec = 2) {
+    const serviceLabel = this._activeEmailService === "hotmail" ? "Hotmail Graph API" : (this._activeEmailService === "unlimitmail" ? "UnlimitMail" : (this._activeEmailService === "gmail" ? "Gmail API" : "Mail.tm"));
+    console.log(`📬 [${serviceLabel}] Đang lắng nghe mã OTP xác minh GitHub...`);
+
+    let result;
+    if (this._activeEmailService === "hotmail" && this._hotmailClient) {
+      const otpRes = await this._hotmailClient.waitForOtpCode({
+        filterSender: "github",
+        timeoutMs: timeoutSec * 1000,
+        intervalMs: intervalSec * 1000,
+      });
+      result = { otpCode: otpRes.otpCode };
+    } else if (this._activeEmailService === "unlimitmail") {
+      result = await this._unlimitMail.waitForVerificationCode(timeoutSec, intervalSec);
+    } else if (this._activeEmailService === "gmail") {
+      result = await this._gmailClient.waitForVerificationCode(timeoutSec, intervalSec + 1);
+    } else {
+      result = await this._mailTm.waitForVerificationCode(timeoutSec, intervalSec);
+    }
+    return result?.otpCode || null;
   }
 
   // Đọc toàn bộ nội dung body text
@@ -1079,11 +1133,12 @@ export class AiAgentRunner {
     }
   }
 
-  // Xử lý sau khi nhập OTP: chờ mạng chậm, khảo sát onboarding, và chuyển tiếp an toàn
+  // Xử lý sau khi nhập OTP: chờ mạng chậm, khảo sát onboarding, reload & lắng nghe lại OTP nếu kẹt ở 'Confirm your email address'
   async _handlePostSignupFlow(page) {
     console.log("-> Đang theo dõi tiến trình hoàn tất đăng ký của GitHub (xử lý mạng chậm & onboarding)...");
     const startTime = Date.now();
     const maxWaitMs = 120000; // Chờ tối đa 2 phút cho mạng chậm / proxy lag
+    let emailVerificationStallCount = 0;
 
     while (Date.now() - startTime < maxWaitMs) {
       if (!page || page.isClosed()) break;
@@ -1098,29 +1153,54 @@ export class AiAgentRunner {
         return true;
       }
 
-      // 2. Nếu gặp trang Khảo sát / Onboarding / Customization (bấm Skip hoặc Continue)
-      const clickedAction = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll("button, a, input[type='submit']"));
-        for (const b of buttons) {
-          const txt = (b.innerText || b.textContent || b.value || "").trim().toLowerCase();
-          if (
-            txt.includes("skip personalization") ||
-            txt.includes("skip") ||
-            txt.includes("continue") ||
-            txt.includes("complete setup")
-          ) {
-            b.scrollIntoView({ behavior: "smooth", block: "center" });
-            b.click();
-            return txt;
-          }
-        }
-        return null;
-      }).catch(() => null);
+      // 2. Kiểm tra nếu vẫn còn bị kẹt ở màn hình 'Confirm your email address' / 'account_verifications'
+      const isStillOnEmailOtp = currentUrl.includes("/account_verifications") ||
+        bodyText.includes("Confirm your email address") ||
+        bodyText.includes("Enter code") ||
+        bodyText.includes("We have sent a code to");
 
-      if (clickedAction) {
-        console.log(`⚡ [Onboarding] Đã bấm nút: '${clickedAction}'`);
-        await this._safeSleep(3000);
+      if (isStillOnEmailOtp) {
+        emailVerificationStallCount++;
+        // Sau ~5s (khoảng 2 lần kiểm tra) nếu vẫn còn ở trang này thì reload lại URL và lắng nghe lại OTP
+        if (emailVerificationStallCount >= 2) {
+          console.log("⚠️ [Confirm Email Stalled] Phát hiện kẹt ở màn hình 'Confirm your email address' sau 5s, đang reload lại trang...");
+          try {
+            await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
+            await this._safeSleep(3000);
+          } catch (reloadErr) {
+            console.warn(`(!) Lỗi reload: ${reloadErr.message}`);
+          }
+
+          const reloadedText = await this._bodyText(page);
+          const reloadedUrl = page.url();
+
+          // Kiểm tra sau reload nếu vẫn là trang Confirm your email address thì lắng nghe lại OTP mới
+          if (
+            reloadedUrl.includes("/account_verifications") ||
+            reloadedText.includes("Confirm your email address") ||
+            reloadedText.includes("Enter code")
+          ) {
+            console.log("📬 [Confirm Email] Vẫn yêu cầu xác thực email, đang lắng nghe mã OTP mới từ hòm thư...");
+            try {
+              const newOtp = await this._fetchEmailVerificationCode(75, 2);
+              if (newOtp) {
+                console.log(`⚡ [Confirm Email] Đã nhận mã OTP mới: [${newOtp}], đang điền lại vào GitHub...`);
+                await this._fillOtpDigits(page, newOtp);
+                await this._safeSleep(4000);
+              }
+            } catch (fetchErr) {
+              console.warn(`(!) Lỗi lấy mã OTP mới: ${fetchErr.message}`);
+            }
+          }
+
+          emailVerificationStallCount = 0;
+          continue;
+        }
+
+        await this._safeSleep(2500);
         continue;
+      } else {
+        emailVerificationStallCount = 0;
       }
 
       // 3. Nếu đã vào Dashboard hoặc trang chính của tài khoản (đã xong khâu tạo tài khoản)
@@ -1137,7 +1217,47 @@ export class AiAgentRunner {
         return true;
       }
 
-      // 4. Nếu vẫn còn trên account_verifications / verify_email / signup
+      // 4. Nếu gặp trang Khảo sát / Onboarding / Customization (bấm Skip hoặc Continue, TUYỆT ĐỐI BỎ QUA 'skip to content')
+      const clickedAction = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll("button, a, input[type='submit']"));
+        for (const b of buttons) {
+          const txt = (b.innerText || b.textContent || b.value || "").trim().toLowerCase();
+          const href = (b.getAttribute("href") || "").trim().toLowerCase();
+
+          // BỎ QUA các link accessibility nội bộ như 'skip to content', '#start-of-content'
+          if (
+            txt.includes("skip to content") ||
+            txt.includes("skip to main") ||
+            href.startsWith("#") ||
+            href.includes("start-of-content")
+          ) {
+            continue;
+          }
+
+          // Chỉ bấm các nút Onboarding / Khảo sát thực sự
+          if (
+            txt.includes("skip personalization") ||
+            txt === "skip" ||
+            txt === "skip this step" ||
+            txt.includes("skip survey") ||
+            txt === "continue" ||
+            txt.includes("complete setup")
+          ) {
+            b.scrollIntoView({ behavior: "smooth", block: "center" });
+            b.click();
+            return txt;
+          }
+        }
+        return null;
+      }).catch(() => null);
+
+      if (clickedAction) {
+        console.log(`⚡ [Onboarding] Đã bấm nút: '${clickedAction}'`);
+        await this._safeSleep(3000);
+        continue;
+      }
+
+      // 5. Nếu vẫn còn trên account_verifications / verify_email / signup
       await this._safeSleep(2000);
     }
     return true;
@@ -2376,24 +2496,8 @@ export class AiAgentRunner {
       }
 
       // 6. Xác thực OTP Email trực tiếp từ Microsoft Graph API / UnlimitMail / Gmail API / Mail.tm
-      const serviceLabel = this._activeEmailService === "hotmail" ? "Hotmail Graph API" : (this._activeEmailService === "unlimitmail" ? "UnlimitMail" : (this._activeEmailService === "gmail" ? "Gmail API" : "Mail.tm"));
-      console.log(`\n[Bước 5] Đang lấy mã OTP trực tiếp từ ${serviceLabel}...`);
-      let result;
-      if (this._activeEmailService === "hotmail" && this._hotmailClient) {
-        const otpRes = await this._hotmailClient.waitForOtpCode({
-          filterSender: "github",
-          timeoutMs: 90000,
-          intervalMs: 2500,
-        });
-        result = { otpCode: otpRes.otpCode };
-      } else if (this._activeEmailService === "unlimitmail") {
-        result = await this._unlimitMail.waitForVerificationCode(90, 2);
-      } else if (this._activeEmailService === "gmail") {
-        result = await this._gmailClient.waitForVerificationCode(90, 3);
-      } else {
-        result = await this._mailTm.waitForVerificationCode(90, 2);
-      }
-      const emailOtp = result.otpCode;
+      console.log(`\n[Bước 5] Đang lấy mã OTP trực tiếp từ Email Service...`);
+      const emailOtp = await this._fetchEmailVerificationCode(90, 2);
 
       console.log("\n[Bước 6] Điền mã OTP vào GitHub...");
       await this._githubPage.bringToFront();
