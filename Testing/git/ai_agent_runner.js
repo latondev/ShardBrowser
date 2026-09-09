@@ -564,37 +564,76 @@ export class AiAgentRunner {
     }
   }
 
-  // Chuyển đổi từ tiếng Anh (số phát âm) sang chuỗi chữ số
+  // Chuyển đổi từ số phát âm đa ngôn ngữ (Multilingual) sang chuỗi chữ số
   _wordsToDigits(text) {
     if (!text || typeof text !== "string") return "";
+
+    // 1. Nếu văn bản đã chứa trực tiếp dãy số (Deepgram smart_format / Whisper thường trả về số thẳng)
+    const directDigits = text.replace(/[^0-9]/g, "");
+    if (directDigits.length >= 4) {
+      return directDigits;
+    }
+
+    // 2. Bản đồ phát âm số đa ngôn ngữ (English, Spanish, French, German, Portuguese, Italian, Vietnamese, Russian...)
     const wordMap = {
-      zero: "0", "0": "0", "oh": "0",
-      one: "1", "1": "1", "won": "1",
-      two: "2", "to": "2", "too": "2", "2": "2",
-      three: "3", "3": "3", "tree": "3",
-      four: "4", "for": "4", "fore": "4", "4": "4",
+      // Tiếng Anh (English)
+      zero: "0", "0": "0", oh: "0", nil: "0",
+      one: "1", "1": "1", won: "1",
+      two: "2", "2": "2", to: "2", too: "2",
+      three: "3", "3": "3", tree: "3",
+      four: "4", "4": "4", for: "4", fore: "4",
       five: "5", "5": "5",
       six: "6", "6": "6",
       seven: "7", "7": "7",
-      eight: "8", "ate": "8", "8": "8",
-      nine: "9", "9": "9", "night": "9"
+      eight: "8", "8": "8", ate: "8",
+      nine: "9", "9": "9", night: "9",
+
+      // Tiếng Tây Ban Nha (Spanish)
+      cero: "0", uno: "1", una: "1", dos: "2", tres: "3", cuatro: "4",
+      cinco: "5", seis: "6", siete: "7", ocho: "8", nueve: "9",
+
+      // Tiếng Pháp (French)
+      zéro: "0", un: "1", une: "1", deux: "2", trois: "3", quatre: "4",
+      cinq: "5", six: "6", sept: "7", huit: "8", neuf: "9",
+
+      // Tiếng Đức (German)
+      null: "0", eins: "1", ein: "1", zwei: "2", zwo: "2", drei: "3", vier: "4",
+      fünf: "5", funf: "5", sechs: "6", sieben: "7", acht: "8", neun: "9",
+
+      // Tiếng Bồ Đào Nha (Portuguese)
+      um: "1", uma: "1", dois: "2", duas: "2", três: "3", tres: "3",
+      quatro: "4", cinco: "5", seis: "6", sete: "7", oito: "8", nove: "9",
+
+      // Tiếng Ý (Italian)
+      due: "2", tre: "3", quattro: "4", cinque: "5", sei: "6",
+      sette: "7", otto: "8", nove: "9",
+
+      // Tiếng Việt (Vietnamese)
+      "không": "0", "khong": "0", "một": "1", "mot": "1", "mốt": "1",
+      "hai": "2", "ba": "3", "bốn": "4", "bon": "4", "tư": "4",
+      "năm": "5", "nam": "5", "lăm": "5", "sáu": "6", "sau": "6",
+      "bảy": "7", "bay": "7", "bẩy": "7", "tám": "8", "tam": "8", "chín": "9", "chin": "9",
+
+      // Tiếng Nga (Russian)
+      "ноль": "0", "один": "1", "два": "2", "три": "3", "четыре": "4",
+      "пять": "5", "шесть": "6", "семь": "7", "восемь": "8", "девять": "9"
     };
 
-    const tokens = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+    const tokens = text.toLowerCase().replace(/[^a-z0-9\s\u00C0-\u024F\u1EA0-\u1EF9\u0400-\u04FF]/g, " ").split(/\s+/).filter(Boolean);
     let digits = "";
     for (const t of tokens) {
-      if (wordMap[t]) {
+      if (wordMap[t] !== undefined) {
         digits += wordMap[t];
       } else {
         for (const char of t) {
-          if (wordMap[char]) digits += wordMap[char];
+          if (wordMap[char] !== undefined) digits += wordMap[char];
         }
       }
     }
     return digits;
   }
 
-  // Nhận diện giọng nói từ Audio Buffer (Ưu tiên Deepgram AI Nova-2, dự phòng Google Speech, Wit.ai & Whisper)
+  // Nhận diện giọng nói từ Audio Buffer (Hỗ trợ Multilingual tự động phát hiện ngôn ngữ qua Deepgram Nova-3 / Nova-2)
   async _recognizeSpeechFromBuffer(audioBuffer, audioUrl = "") {
     if (!audioBuffer || audioBuffer.length === 0) return null;
 
@@ -607,60 +646,72 @@ export class AiAgentRunner {
 
     console.log(`-> Kích thước Audio: ${(audioBuffer.length / 1024).toFixed(1)} KB (Định dạng: ${mimeType})`);
 
-    // 1. DEEPGRAM AI NOVA-2 SPEECH-TO-TEXT (ƯU TIÊN SỐ 1 - Siêu chính xác & <300ms)
+    // 1. DEEPGRAM MULTILINGUAL AI SPEECH-TO-TEXT (Ưu tiên Nova-3 / Nova-2 với detect_language=true)
     const deepgramApiKey = process.env.DEEPGRAM_API_KEY || "4742e339567628fdf7026827f5398f038ada706f";
     if (deepgramApiKey) {
-      try {
-        console.log("-> 🚀 [Deepgram AI] Đang gửi file âm thanh tới mô hình Nova-2...");
-        const dgResp = await axios.post(
-          "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en",
-          audioBuffer,
-          {
-            headers: {
-              Authorization: `Token ${deepgramApiKey}`,
-              "Content-Type": mimeType,
-            },
-            timeout: 10000,
-          }
-        );
+      const candidateEndpoints = [
+        "https://api.deepgram.com/v1/listen?model=nova-3&detect_language=true&smart_format=true",
+        "https://api.deepgram.com/v1/listen?model=nova-2&detect_language=true&smart_format=true",
+        "https://api.deepgram.com/v1/listen?model=nova-2&language=multi&smart_format=true",
+        "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en"
+      ];
 
-        const transcript = dgResp.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
-        if (transcript) {
-          console.log(`🗣️ [Deepgram Trích xuất]: "${transcript}"`);
-          const digits = this._wordsToDigits(transcript);
-          if (digits.length >= 3) {
-            console.log(`🎯 [Deepgram AI Nova-2] Nhận diện thành công dãy số: [ \x1b[32m${digits}\x1b[0m ]`);
-            return digits;
+      for (const endpoint of candidateEndpoints) {
+        try {
+          const modelName = endpoint.includes("nova-3") ? "Nova-3 (Multilingual)" : "Nova-2 (Multilingual)";
+          console.log(`-> 🚀 [Deepgram AI] Đang nhận diện âm thanh qua mô hình ${modelName}...`);
+          const dgResp = await axios.post(
+            endpoint,
+            audioBuffer,
+            {
+              headers: {
+                Authorization: `Token ${deepgramApiKey}`,
+                "Content-Type": mimeType,
+              },
+              timeout: 10000,
+            }
+          );
+
+          const transcript = dgResp.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+          const detectedLang = dgResp.data?.results?.channels?.[0]?.detected_language || "auto";
+          if (transcript) {
+            console.log(`🗣️ [Deepgram Trích xuất - Lang: ${detectedLang}]: "${transcript}"`);
+            const digits = this._wordsToDigits(transcript);
+            if (digits.length >= 3) {
+              console.log(`🎯 [Deepgram Multilingual] Nhận diện thành công dãy số: [ \x1b[32m${digits}\x1b[0m ]`);
+              return digits;
+            }
           }
+          break;
+        } catch (dgErr) {
+          console.warn(`(!) Lỗi Deepgram (${endpoint}): ${dgErr.response?.data?.err_msg || dgErr.message}`);
         }
-      } catch (dgErr) {
-        console.warn(`(!) Lỗi Deepgram API: ${dgErr.response?.data?.err_msg || dgErr.message}`);
       }
     }
 
-    // 2. Dự phòng: Google Speech Recognition API
-    try {
-      console.log("-> [STT Fallback 1] Thử nhận diện qua Google Speech Engine...");
-      const gResp = await axios.post(
-        "https://www.google.com/speech-api/v2/recognize?output=json&lang=en-us&key=AIzaSyA_placeholder",
-        audioBuffer,
-        {
-          headers: { "Content-Type": mimeType === "audio/wav" ? "audio/l16; rate=16000" : "audio/mpeg" },
-          timeout: 8000,
-        }
-      ).catch(() => null);
+    // 2. Dự phòng 1: RapidAPI Whisper Speech-to-Text (Hỗ trợ hơn 90 ngôn ngữ)
+    const rapidKey = this._gmailClient?._apiKey || "b6886ec1f7mshbb17b1e26e0fab2p11d6b0jsna02d376b7db5";
+    if (rapidKey) {
+      console.log("-> [STT Fallback 1] Thử nhận diện qua RapidAPI Whisper Engine (Multilingual)...");
+      try {
+        const resp = await axios.post("https://whisper4.p.rapidapi.com/transcribe", audioBuffer, {
+          headers: {
+            "x-rapidapi-key": rapidKey,
+            "x-rapidapi-host": "whisper4.p.rapidapi.com",
+            "Content-Type": mimeType,
+          },
+          timeout: 12000,
+        }).catch(() => null);
 
-      if (gResp?.data) {
-        const text = typeof gResp.data === "string" ? gResp.data : JSON.stringify(gResp.data);
-        const digits = this._wordsToDigits(text);
-        if (digits.length >= 3) {
-          console.log(`🎯 [Google Speech] Nhận diện thành công: [ ${digits} ]`);
-          return digits;
+        if (resp?.data?.text) {
+          console.log(`🗣️ [RapidAPI Whisper Trích xuất]: "${resp.data.text}"`);
+          const digits = this._wordsToDigits(resp.data.text);
+          if (digits.length >= 3) return digits;
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
-    // 3. Dự phòng: Wit.ai Speech API
+    // 3. Dự phòng 2: Wit.ai Speech API
     console.log("-> [STT Fallback 2] Thử nhận diện qua Wit.ai API...");
     const witTokens = [
       "6Q7YKLTH3E4Q4NZQZ5J3X2C4J7QG3Y5U",
@@ -702,74 +753,241 @@ export class AiAgentRunner {
       } catch (witErr) {}
     }
 
-    // 4. Dự phòng: RapidAPI Whisper Speech-to-Text
-    const rapidKey = this._gmailClient?._apiKey || "b6886ec1f7mshbb17b1e26e0fab2p11d6b0jsna02d376b7db5";
-    if (rapidKey) {
-      console.log("-> [STT Fallback 3] Thử nhận diện qua RapidAPI Whisper Engine...");
-      try {
-        const resp = await axios.post("https://whisper4.p.rapidapi.com/transcribe", audioBuffer, {
-          headers: {
-            "x-rapidapi-key": rapidKey,
-            "x-rapidapi-host": "whisper4.p.rapidapi.com",
-            "Content-Type": mimeType,
-          },
-          timeout: 12000,
-        }).catch(() => null);
-
-        if (resp?.data?.text) {
-          console.log(`🗣️ [RapidAPI Whisper Trích xuất]: "${resp.data.text}"`);
-          const digits = this._wordsToDigits(resp.data.text);
-          if (digits.length >= 3) return digits;
-        }
-      } catch {}
-    }
-
     console.warn("⚠️ Không thể trích xuất tự động dãy số từ file Audio này.");
     return null;
   }
 
-  // Phát hiện CAPTCHA và chờ người kiểm thử xử lý trực tiếp trên trình duyệt.
-  async _handleDataDomeCaptcha(page, _mode = "manual") {
+  // Tự động phát hiện và giải Captcha bằng Audio Voice (DataDome / geo.captcha-delivery.com / Arkose)
+  async _handleDataDomeCaptcha(page, mode = "audio") {
     if (!page || page.isClosed() || !this._browser) return false;
 
-    const hasCaptcha = async () => {
-      if (!page || page.isClosed() || !this._browser) return false;
-      const captchaUrl = /captcha-delivery\.com|geo\.captcha|arkoselabs|datadome/i;
-      const hasCaptchaTarget = this._browser.targets().some((target) => captchaUrl.test(target.url()));
-      const hasCaptchaFrame = page.frames().some((frame) => captchaUrl.test(frame.url()));
-      const hasCaptchaContent = await page.evaluate(() => {
-        const body = `${document.body?.innerText || ""} ${document.title || ""}`.toLowerCase();
-        return body.includes("why is this step needed") ||
-               body.includes("we detected unusual activity from your device or network") ||
-               body.includes("verification required") ||
-               body.includes("slide right to secure your access") ||
-               !!document.querySelector("#ddv1-captcha-container, .datadome-container, #captcha__audio__button, iframe[src*='captcha-delivery'], iframe[src*='geo.captcha'], iframe[src*='arkoselabs']");
-      }).catch(() => false);
-      return hasCaptchaTarget || hasCaptchaFrame || hasCaptchaContent;
-    };
+    try {
+      // 1. Kiểm tra các tab / target con có URL captcha-delivery
+      const targets = this._browser.targets();
+      let captchaTarget = targets.find(t => t.url().includes("captcha-delivery.com") || t.url().includes("geo.captcha") || t.url().includes("datadome"));
+      let captchaPage = null;
 
-    if (!(await hasCaptcha())) return false;
-
-    console.log("\n🧩 [CAPTCHA] Vui lòng giải thủ công trên cửa sổ trình duyệt. Runner đang chờ...");
-    const timeoutMs = 10 * 60 * 1000;
-    const startedAt = Date.now();
-    let clearChecks = 0;
-
-    while (Date.now() - startedAt < timeoutMs) {
-      await this._safeSleep(1000);
-      if (!page || page.isClosed() || !this._browser) return false;
-      if (await hasCaptcha()) {
-        clearChecks = 0;
-        continue;
+      if (captchaTarget) {
+        captchaPage = await captchaTarget.page().catch(() => null);
       }
-      clearChecks++;
-      if (clearChecks >= 2) {
-        console.log("✅ [CAPTCHA] Challenge đã đóng, runner tiếp tục.");
-        return true;
+
+      // 2. Kiểm tra các iframe trong trang chính
+      const frames = page.frames();
+      let captchaFrame = frames.find(f => f.url().includes("captcha-delivery.com") || f.url().includes("geo.captcha") || f.url().includes("arkoselabs") || f.url().includes("datadome"));
+
+      const ctx = captchaPage || captchaFrame || page;
+
+      // 3. Kiểm tra các dấu hiệu nhận biết DataDome Captcha
+      const captchaInfo = await ctx.evaluate(() => {
+        const body = (document.body ? document.body.innerText : "") + " " + (document.title || "");
+        const lower = body.toLowerCase();
+        const hasText = lower.includes("why is this step needed") ||
+                        lower.includes("we detected unusual activity from your device or network") ||
+                        lower.includes("verification required") ||
+                        lower.includes("slide right to secure your access") ||
+                        lower.includes("captcha-delivery");
+
+        const hasAudioBtn = !!(document.querySelector("#captcha__audio__button") || document.querySelector("[aria-label*='audio']"));
+        const hasPuzzleBtn = !!(document.querySelector("#captcha__puzzle__button") || document.querySelector("[aria-label*='visual']"));
+        const hasContainer = !!(document.querySelector("#ddv1-captcha-container") || document.querySelector(".datadome-container") || document.querySelector("iframe[src*='captcha-delivery']"));
+
+        return {
+          isDetected: hasText || hasAudioBtn || hasPuzzleBtn || hasContainer,
+          hasAudioBtn,
+        };
+      }).catch(() => ({ isDetected: false, hasAudioBtn: false }));
+
+      if (!captchaTarget && !captchaFrame && !captchaInfo.isDetected) {
+        return false;
       }
+
+      console.log(`\n🧩 \x1b[33m[PHÁT HIỆN CAPTCHA]\x1b[0m Hệ thống phát hiện thử thách xác minh DataDome / Geo Captcha!`);
+
+      // NẾU CHẾ ĐỘ AUDIO ĐƯỢC BẬT (Mặc định): Tự động giải bằng Audio AI STT
+      if (mode === "audio" || mode === "auto") {
+        console.log("-> 1. Bấm nút chuyển sang chế độ Âm thanh (Audio Voice Captcha) bằng chuột thật...");
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const audioBtn = await ctx.$("#captcha__audio__button, button.audio-button, button.audio-btn, button[data-type='audio'], [aria-label*='audio' i], [title*='audio' i]");
+            if (audioBtn) {
+              const box = await audioBtn.boundingBox();
+              if (box) {
+                await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+                await this._safeSleep(200 + Math.floor(Math.random() * 150));
+              }
+              await audioBtn.click({ delay: 70 });
+              break;
+            }
+          } catch {}
+          await this._safeSleep(1000);
+        }
+
+        await this._safeSleep(2000);
+
+        // Đăng ký listener bắt trọn vẹn file âm thanh khi trình duyệt phát
+        let capturedAudioBuf = null;
+        let capturedAudioUrl = null;
+        const audioListener = async (res) => {
+          try {
+            const u = res.url();
+            const ct = (res.headers()["content-type"] || "").toLowerCase();
+            if (u.includes("/captcha/audio") || u.includes(".wav") || u.includes(".mp3") || ct.includes("audio/")) {
+              capturedAudioUrl = u;
+              const buf = await res.buffer().catch(() => null);
+              if (buf && buf.length > 500) {
+                capturedAudioBuf = buf;
+              }
+            }
+          } catch {}
+        };
+        page.on("response", audioListener);
+
+        // Bấm nút Play phát âm thanh bằng chuột thật
+        console.log("-> 2. Bấm nút phát âm thanh đọc dãy số bằng chuột thật...");
+        try {
+          const playBtn = await ctx.$("div.audio-captcha-play-container > button, #captcha__audio button, button[aria-label*='Listen' i], button[aria-label*='Play' i], button.play-button");
+          if (playBtn) {
+            const box = await playBtn.boundingBox();
+            if (box) {
+              await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+              await this._safeSleep(200 + Math.floor(Math.random() * 150));
+            }
+            await playBtn.click({ delay: 80 });
+          }
+        } catch {}
+
+        // Chờ stream audio tải về (tối đa 4s)
+        const audioWaitStart = Date.now();
+        while (Date.now() - audioWaitStart < 4000) {
+          if (capturedAudioBuf) break;
+          await this._safeSleep(300);
+        }
+        page.off("response", audioListener);
+
+        // DataDome yêu cầu đợi phát hết âm thanh (khoảng 3.5s - 4.5s) trước khi gõ phím
+        console.log("⏳ [Nghe Âm Thanh] Chờ phát trọn vẹn dãy số trên trình duyệt...");
+        await this._safeSleep(3800 + Math.floor(Math.random() * 800));
+
+        // Fallback nếu listener không bắt được buffer
+        if (!capturedAudioBuf) {
+          const audioUrl = await ctx.evaluate(() => {
+            const audioEl = document.querySelector("audio");
+            if (audioEl && audioEl.src) return audioEl.src;
+            const sourceEl = document.querySelector("audio source");
+            if (sourceEl && sourceEl.src) return sourceEl.src;
+            return null;
+          }).catch(() => null);
+
+          if (audioUrl) {
+            try {
+              const resp = await axios.get(audioUrl, { responseType: "arraybuffer", timeout: 8000 });
+              if (resp.data) capturedAudioBuf = Buffer.from(resp.data);
+            } catch {}
+          }
+        }
+
+        let recognizedDigits = null;
+        if (capturedAudioBuf) {
+          console.log("🤖 [AI Speech-to-Text] Đang nhận diện dãy số qua Deepgram Nova-3 Multilingual...");
+          recognizedDigits = await this._recognizeSpeechFromBuffer(capturedAudioBuf, capturedAudioUrl || "audio.wav");
+        }
+
+        if (recognizedDigits) {
+          console.log(`🎯 [AI Speech-to-Text] Đã nhận diện thành công dãy số: [ \x1b[32m${recognizedDigits}\x1b[0m ]`);
+          console.log(`-> Đang điền tuần tự các ô số [${recognizedDigits}] vào form xác thực...`);
+
+          const allInputs = await ctx.$$("input[type='text'], input[type='tel'], input[type='number'], #ddv1-captcha-container input, #captcha__audio input");
+          
+          if (allInputs.length > 0) {
+            const firstInput = allInputs[0];
+            const firstBox = await firstInput.boundingBox().catch(() => null);
+            if (firstBox) {
+              await this._humanMouseMove(page, firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
+              await this._safeSleep(150);
+            }
+            await firstInput.click({ delay: 50 }).catch(() => {});
+            await this._safeSleep(200);
+
+            if (allInputs.length >= 6) {
+              for (let i = 0; i < recognizedDigits.length && i < allInputs.length; i++) {
+                const digit = recognizedDigits[i];
+                const inp = allInputs[i];
+
+                const box = await inp.boundingBox().catch(() => null);
+                if (box) {
+                  await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+                  await this._safeSleep(60 + Math.floor(Math.random() * 50));
+                }
+                await inp.click({ delay: 40 }).catch(() => {});
+                await this._safeSleep(80 + Math.floor(Math.random() * 60));
+
+                await page.keyboard.press(digit);
+                await this._safeSleep(150 + Math.floor(Math.random() * 120));
+              }
+            } else {
+              for (const digit of recognizedDigits) {
+                await page.keyboard.press(digit);
+                await this._safeSleep(180 + Math.floor(Math.random() * 100));
+              }
+            }
+          }
+
+          await this._safeSleep(1500 + Math.floor(Math.random() * 700));
+
+          console.log("-> Bấm nút 'Verify' bằng chuột thật để hoàn tất xác thực...");
+          try {
+            const submitBtn = await ctx.$(".audio-captcha-submit-button, div.audio-captcha-submit-container > button, #captcha__audio button[type='submit'], [aria-label='Verify'], button.audio-captcha-submit, button[type='submit']");
+            if (submitBtn) {
+              const box = await submitBtn.boundingBox().catch(() => null);
+              if (box) {
+                await this._humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+                await this._safeSleep(300 + Math.floor(Math.random() * 200));
+              }
+              await submitBtn.click({ delay: 90 });
+              console.log("✅ [Captcha Submitted] Đã gửi mã xác nhận âm thanh!");
+            }
+          } catch {}
+
+          await this._safeSleep(4000);
+          return true;
+        }
+      }
+
+      // Dự phòng: Nếu tự động giải chưa thành công hoặc mode = "manual", chờ người dùng giải trên màn hình
+      console.log("💡 [Chờ Thủ Công] Đang ở màn hình xác thực DataDome (Bạn có thể giải tiếp trên màn hình trình duyệt)...");
+      const timeoutMs = 5 * 60 * 1000;
+      const startedAt = Date.now();
+      let clearChecks = 0;
+
+      while (Date.now() - startedAt < timeoutMs) {
+        await this._safeSleep(1000);
+        if (!page || page.isClosed() || !this._browser) return false;
+        
+        const isStillThere = await ctx.evaluate(() => {
+          const body = `${document.body?.innerText || ""} ${document.title || ""}`.toLowerCase();
+          return body.includes("why is this step needed") ||
+                 body.includes("we detected unusual activity from your device or network") ||
+                 body.includes("verification required") ||
+                 body.includes("slide right to secure your access") ||
+                 !!document.querySelector("#ddv1-captcha-container, .datadome-container, iframe[src*='captcha-delivery']");
+        }).catch(() => false);
+
+        if (isStillThere) {
+          clearChecks = 0;
+          continue;
+        }
+        clearChecks++;
+        if (clearChecks >= 2) {
+          console.log("✅ [CAPTCHA] Thử thách đã hoàn tất, runner tiếp tục.");
+          return true;
+        }
+      }
+      return false;
+    } catch (captchaErr) {
+      console.warn(`(!) Lỗi xử lý Captcha: ${captchaErr.message}`);
+      return false;
     }
-
-    throw new Error("CAPTCHA_MANUAL_TIMEOUT: Chưa hoàn tất CAPTCHA sau 10 phút.");
   }
 
   // Click an toàn không bấm nhầm Google/Apple/Link reload
