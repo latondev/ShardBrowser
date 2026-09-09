@@ -903,9 +903,9 @@ export class AiAgentRunner {
         "#captcha__slider"
       ];
 
-      // Quét định vị Slider trong vòng tối đa 15 giây
+      // Quét định vị Slider trong vòng tối đa 30 giây (hỗ trợ Proxy mạng chậm/đang xoay)
       const scanStart = Date.now();
-      const maxScanTime = 15000;
+      const maxScanTime = 30000;
 
       while (Date.now() - scanStart < maxScanTime) {
         if (!page || page.isClosed()) break;
@@ -1094,8 +1094,36 @@ export class AiAgentRunner {
       if (!isCaptcha) return false;
 
       console.log(`\n🧩 \x1b[33m[PHÁT HIỆN CAPTCHA]\x1b[0m Đang tự động giải thử thách DataDome / Geo Captcha (Chế độ: ${selectedMode.toUpperCase()})...`);
-      console.log("⏳ [Chờ Render] Đang chờ 5s để iframe và hình ảnh Captcha nạp đầy đủ 100%...");
-      await this._safeSleep(5000);
+      console.log("⏳ [Chờ Network & Render] Đang chờ mạng ổn định, iframe nạp 100% và spinner tải hoàn tất...");
+      
+      // Chờ Network Idle và iframe nạp hoàn chỉnh (tối đa 15s)
+      try {
+        await Promise.race([
+          page.waitForNetworkIdle({ idleTime: 1000, timeout: 15000 }),
+          this._safeSleep(8000)
+        ]).catch(() => {});
+      } catch {}
+
+      // Polling chờ các spinner / loader biến mất
+      const waitLoaderStart = Date.now();
+      while (Date.now() - waitLoaderStart < 12000) {
+        if (!page || page.isClosed()) break;
+        const isStillSpinning = await page.evaluate(() => {
+          const loaders = Array.from(document.querySelectorAll("#loading, .loading, .spinner, .loader, [class*='loader'], [class*='spinner'], [class*='loading']"));
+          for (const l of loaders) {
+            const r = l.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0 && !l.hidden && window.getComputedStyle(l).display !== "none") {
+              return true;
+            }
+          }
+          return false;
+        }).catch(() => false);
+
+        if (!isStillSpinning) break;
+        await this._safeSleep(1000);
+      }
+
+      await this._safeSleep(2000);
 
       // ==========================================
       // CHẾ ĐỘ 1: GIẢI BẰNG OMOCAPTCHA SLIDER
@@ -1105,8 +1133,8 @@ export class AiAgentRunner {
         if (sliderSolved) {
           // Chờ kiểm tra xem captcha đã biến mất chưa
           const verifyStart = Date.now();
-          while (Date.now() - verifyStart < 6000) {
-            await this._safeSleep(1000);
+          while (Date.now() - verifyStart < 8000) {
+            await this._safeSleep(1200);
             if (!page || page.isClosed()) break;
             const stillActive = await checkCaptchaDetected();
             if (!stillActive) {
