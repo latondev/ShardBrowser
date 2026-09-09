@@ -170,46 +170,61 @@ export class BatchHotmailRunner {
       console.log(`   [TIẾN ĐỘ: ${accIndex}/${lines.length}] -> ĐĂNG KÝ GITHUB CHO: ${targetEmail}`);
       console.log(`<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<`);
 
-      // Khởi tạo Runner với Hotmail Client & Proxy Mode & Proxy Group & Profile / Clone
-      const isInlineProxy = this._proxyMode.includes(":") || this._proxyMode.includes("//");
-      const runner = new AiAgentRunner({
-        hotmailClient: hotmailClient,
-        proxyMode: isInlineProxy ? "shard" : this._proxyMode,
-        proxyGroup: this._proxyGroup,
-        proxy: isInlineProxy ? this._proxyMode : undefined,
-        captchaMode: this._captchaMode,
-        profile: this._profile,
-        cloneFrom: this._cloneFrom,
-      });
-      this._currentRunner = runner;
+      let isSuccess = false;
+      let attempt = 0;
+      const maxAttempts = 3;
 
-      try {
-        const result = await runner.runFullE2EWorkflow({
-          saveSecrets: true,
+      while (attempt < maxAttempts && !isSuccess && !this._isStopping) {
+        attempt++;
+        const runner = new AiAgentRunner({
+          hotmailClient: hotmailClient,
           proxyMode: isInlineProxy ? "shard" : this._proxyMode,
           proxyGroup: this._proxyGroup,
           proxy: isInlineProxy ? this._proxyMode : undefined,
+          captchaMode: this._captchaMode,
           profile: this._profile,
           cloneFrom: this._cloneFrom,
         });
+        this._currentRunner = runner;
 
-        this._successCount++;
-        const accTime = (Date.now() - accStart) / 1000;
-        console.log(`\n🎉 [XONG #${accIndex}/${lines.length}]: ${result.email} (User: ${result.username || 'OK'}) | Thời gian: ${this._formatTime(accTime)}`);
-
-        // Ghi thêm vào file chuyên biệt của hotmail
         try {
-          const hotmailOutPath = path.join(process.cwd(), "Testing", "git", "hotmail", "github_accounts.txt");
-          const outLine = `${result.email}|${result.password}|${result.twoFactorSecret || "N/A"}\n`;
-          appendFileSync(hotmailOutPath, outLine, "utf8");
-        } catch {}
+          const result = await runner.runFullE2EWorkflow({
+            saveSecrets: true,
+            proxyMode: isInlineProxy ? "shard" : this._proxyMode,
+            proxyGroup: this._proxyGroup,
+            proxy: isInlineProxy ? this._proxyMode : undefined,
+            profile: this._profile,
+            cloneFrom: this._cloneFrom,
+          });
 
-      } catch (err) {
-        this._failedCount++;
-        const accTime = (Date.now() - accStart) / 1000;
-        console.error(`\n❌ [LỖI #${accIndex}/${lines.length} - ${targetEmail}]: ${err.message} | Thời gian: ${this._formatTime(accTime)}`);
-      } finally {
-        this._currentRunner = null;
+          isSuccess = true;
+          this._successCount++;
+          const accTime = (Date.now() - accStart) / 1000;
+          console.log(`\n🎉 [XONG #${accIndex}/${lines.length}]: ${result.email} (User: ${result.username || 'OK'}) | Thời gian: ${this._formatTime(accTime)}`);
+
+          // Ghi thêm vào file chuyên biệt của hotmail
+          try {
+            const hotmailOutPath = path.join(process.cwd(), "Testing", "git", "hotmail", "github_accounts.txt");
+            const outLine = `${result.email}|${result.password}|${result.twoFactorSecret || "N/A"}\n`;
+            appendFileSync(hotmailOutPath, outLine, "utf8");
+          } catch {}
+
+        } catch (err) {
+          const accTime = (Date.now() - accStart) / 1000;
+          if (err.message && (err.message.includes("PROXY_BLOCKED_CDN") || err.message.includes("PROXY_CAPTCHA_NETWORK_ERROR") || err.message.includes("GITHUB_RATE_LIMITED") || err.message.includes("Rate Limit"))) {
+            console.warn(`\n🔄 [TỰ ĐỘNG ĐỔI PROXY] (${err.message}) -> Đang chuyển ngay sang Proxy sạch tiếp theo (Lần thử ${attempt}/${maxAttempts})...`);
+            if (attempt >= maxAttempts) {
+              this._failedCount++;
+              console.error(`\n❌ [LỖI #${accIndex}/${lines.length} - ${targetEmail}]: Đã thử hết ${maxAttempts} proxy nhưng đều bị giới hạn | Thời gian: ${this._formatTime(accTime)}`);
+            }
+          } else {
+            this._failedCount++;
+            console.error(`\n❌ [LỖI #${accIndex}/${lines.length} - ${targetEmail}]: ${err.message} | Thời gian: ${this._formatTime(accTime)}`);
+            break;
+          }
+        } finally {
+          this._currentRunner = null;
+        }
       }
 
       // Nghỉ cooldown giữa các tài khoản nếu chưa phải tài khoản cuối
@@ -232,7 +247,7 @@ function parseCommandLineArgs() {
   let proxyGroup = "all";
   let profile = null;
   let cloneFrom = null;
-  let captchaMode = process.env.CAPTCHA_MODE || "slider";
+  let captchaMode = process.env.CAPTCHA_MODE || "audio";
 
   for (const arg of args) {
     if (arg.startsWith("--file=")) {

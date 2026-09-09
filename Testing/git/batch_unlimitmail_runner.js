@@ -31,14 +31,14 @@ export class BatchUnlimitMailRunner {
   _proxyGroup = "all";
   _profile = null;
   _cloneFrom = null;
-  _captchaMode = "slider"; // "slider" | "audio" | "auto"
+  _captchaMode = "audio"; // "audio" (Khuyên dùng - tỉ lệ 99.9%) | "slider" | "auto"
   _successCount = 0;
   _failedCount = 0;
   _currentRunner = null;
   _isStopping = false;
   _history = [];
 
-  constructor(totalTarget = 0, cooldownSeconds = 30, proxyMode = "shard", proxyGroup = "all", profile = null, cloneFrom = null, captchaMode = "slider") {
+  constructor(totalTarget = 0, cooldownSeconds = 30, proxyMode = "shard", proxyGroup = "all", profile = null, cloneFrom = null, captchaMode = "audio") {
     const num = Number(totalTarget);
     this._totalTarget = (!num || num <= 0) ? Infinity : num;
     this._cooldownSeconds = Number(cooldownSeconds) || 30;
@@ -46,7 +46,7 @@ export class BatchUnlimitMailRunner {
     this._proxyGroup = proxyGroup || "all";
     this._profile = profile || null;
     this._cloneFrom = cloneFrom || null;
-    this._captchaMode = captchaMode || "slider";
+    this._captchaMode = captchaMode || "audio";
 
     // Lắng nghe tín hiệu dừng an toàn (Ctrl + C)
     process.on("SIGINT", async () => {
@@ -127,47 +127,48 @@ export class BatchUnlimitMailRunner {
 
       let isSuccess = false;
       let accountEmail = "";
+      let attempt = 0;
+      const maxAttempts = 3;
 
-      try {
-        await runnerInstance.runFullE2EWorkflow({
-          saveSecrets: true,
-          proxyMode: isInlineProxy ? "shard" : this._proxyMode,
-          proxyGroup: this._proxyGroup,
-          proxy: isInlineProxy ? this._proxyMode : undefined,
-        });
+      while (attempt < maxAttempts && !isSuccess && !this._isStopping) {
+        attempt++;
+        try {
+          await runnerInstance.runFullE2EWorkflow({
+            saveSecrets: true,
+            proxyMode: isInlineProxy ? "shard" : this._proxyMode,
+            proxyGroup: this._proxyGroup,
+            proxy: isInlineProxy ? this._proxyMode : undefined,
+          });
 
-        isSuccess = true;
-        this._successCount++;
-        accountEmail = runnerInstance._accountState?.email || "N/A";
+          isSuccess = true;
+          this._successCount++;
+          accountEmail = runnerInstance._accountState?.email || "N/A";
 
-        const accTime = (Date.now() - accStart) / 1000;
-        console.log(`\n🎉 [XONG TÀI KHOẢN UNLIMITMAIL #${index}]: ${accountEmail} | Thời gian: ${this._formatTime(accTime)}`);
-        index++;
-      } catch (err) {
-        const accTime = (Date.now() - accStart) / 1000;
-
-        if (err.message && err.message.includes("EMAIL_ALREADY_EXISTS")) {
-          console.warn(`\n🔄 [EMAIL ĐÃ TỒN TẠI]: Tự động bỏ qua và tạo tài khoản #${index} mới...`);
-        } else if (err.message && (err.message.includes("PROXY_BLOCKED_CDN") || err.message.includes("PROXY_CAPTCHA_NETWORK_ERROR"))) {
-          console.warn(`\n🔄 [ĐỔI PROXY]: Proxy này bị nghẽn/đứt kết nối với CDN hoặc máy chủ Captcha của GitHub. Đang tự động đổi Proxy khác...`);
-        } else if (err.message && (err.message.includes("GITHUB_RATE_LIMITED") || err.message.includes("Rate Limit"))) {
-          this._failedCount++;
-          console.warn(`\n⚠️ [RATE LIMIT IP]: ${err.message}`);
-          console.warn("👉 Khuyến nghị: Hãy dùng Proxy Shard/Proxy Xoay hoặc tăng cooldown.");
+          const accTime = (Date.now() - accStart) / 1000;
+          console.log(`\n🎉 [XONG TÀI KHOẢN UNLIMITMAIL #${index}]: ${accountEmail} | Thời gian: ${this._formatTime(accTime)}`);
           index++;
-        } else {
-          this._failedCount++;
-          console.error(`\n❌ [LỖI TÀI KHOẢN #${index}]: ${err.message} | Thời gian: ${this._formatTime(accTime)}`);
-          index++;
+        } catch (err) {
+          const accTime = (Date.now() - accStart) / 1000;
+
+          if (err.message && err.message.includes("EMAIL_ALREADY_EXISTS")) {
+            console.warn(`\n🔄 [EMAIL ĐÃ TỒN TẠI]: Tự động bỏ qua và tạo tài khoản #${index} mới...`);
+            break;
+          } else if (err.message && (err.message.includes("PROXY_BLOCKED_CDN") || err.message.includes("PROXY_CAPTCHA_NETWORK_ERROR") || err.message.includes("GITHUB_RATE_LIMITED") || err.message.includes("Rate Limit"))) {
+            console.warn(`\n🔄 [TỰ ĐỘNG ĐỔI PROXY] (${err.message}) -> Đang chuyển ngay sang Proxy sạch tiếp theo (Lần thử ${attempt}/${maxAttempts})...`);
+            if (attempt >= maxAttempts) {
+              this._failedCount++;
+              console.error(`\n❌ [LỖI TÀI KHOẢN #${index}]: Đã thử hết ${maxAttempts} proxy nhưng đều bị giới hạn | Thời gian: ${this._formatTime(accTime)}`);
+              index++;
+            }
+          } else {
+            this._failedCount++;
+            console.error(`\n❌ [LỖI TÀI KHOẢN #${index}]: ${err.message} | Thời gian: ${this._formatTime(accTime)}`);
+            index++;
+            break;
+          }
+        } finally {
+          this._currentRunner = null;
         }
-      } finally {
-        this._currentRunner = null;
-        this._history.push({
-          index,
-          email: accountEmail,
-          success: isSuccess,
-          duration: (Date.now() - accStart) / 1000,
-        });
       }
 
       if ((isInfinite || index <= this._totalTarget) && !this._isStopping) {
@@ -191,7 +192,7 @@ function parseArgs() {
   let proxyGroup = process.env.PROXY_GROUP || "all";
   let profile = process.env.SHARD_PROFILE || null;
   let cloneFrom = process.env.SHARD_CLONE_FROM || null;
-  let captchaMode = process.env.CAPTCHA_MODE || "slider";
+  let captchaMode = process.env.CAPTCHA_MODE || "audio";
 
   for (const arg of args) {
     if (arg.startsWith("--count=")) {

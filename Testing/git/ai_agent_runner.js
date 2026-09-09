@@ -263,7 +263,7 @@ export class AiAgentRunner {
     this._headers = { Authorization: `Bearer ${this._launcherToken}` };
     this._proxyMode = customConfig.proxyMode || process.env.PROXY_MODE || "shard";
     this._proxyGroup = customConfig.proxyGroup || process.env.PROXY_GROUP || "all";
-    this._captchaMode = customConfig.captchaMode || process.env.CAPTCHA_MODE || "slider";
+    this._captchaMode = customConfig.captchaMode || process.env.CAPTCHA_MODE || "audio";
     this._omocaptchaClient = customConfig.omocaptchaClient || new OMOCaptchaClient(customConfig.omocaptchaKey || process.env.OMOCAPTCHA_KEY);
     this._gmailClient = new GmailCreatorClient(customConfig.rapidApiKey);
     this._mailTm = new MailTmClient();
@@ -553,83 +553,19 @@ export class AiAgentRunner {
     };
   }
 
-  // Ẩn danh CDP / Anti-Bot Stealth Evasions (Xoá triệt để dấu hiệu automation & đồng bộ Timezone/Locale theo Proxy động)
+  // Ẩn danh CDP / Anti-Bot Stealth (Đồng bộ Timezone/Locale theo Proxy động mà không can thiệp prototype JS)
   async _injectStealthEvasions(page) {
     if (!page || page.isClosed()) return;
 
     try {
       const geo = this._activeProxyGeo || { timezone: "America/New_York", locale: "en-US", languages: ["en-US", "en"] };
 
-      // 1. Áp dụng CDP Emulation Override (Timezone & Locale theo Proxy động)
+      // Áp dụng CDP Emulation Override (Timezone & Locale theo Proxy động)
       try {
         const client = await page.target().createCDPSession();
-        await client.send("Emulation.setTimezoneOverride", { timezoneId: geo.timezone }).catch(() => {});
-        await client.send("Emulation.setLocaleOverride", { locale: geo.locale }).catch(() => {});
+        if (geo.timezone) await client.send("Emulation.setTimezoneOverride", { timezoneId: geo.timezone }).catch(() => {});
+        if (geo.locale) await client.send("Emulation.setLocaleOverride", { locale: geo.locale }).catch(() => {});
       } catch {}
-
-      // 2. Tiêm script xóa bỏ hoàn toàn dấu vết Puppeteer / Webdriver / CDP vào trước khi DOM nạp
-      await page.evaluateOnNewDocument((langs, loc) => {
-        // Xóa navigator.webdriver
-        try {
-          Object.defineProperty(navigator, "webdriver", {
-            get: () => undefined,
-            configurable: true
-          });
-          delete Object.getPrototypeOf(navigator).webdriver;
-        } catch {}
-
-        // Giả lập window.chrome runtime đầy đủ chuẩn Chrome Native
-        try {
-          window.chrome = {
-            app: { isInstalled: false, InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" }, RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" } },
-            runtime: {
-              OnInstalledReason: { CHROME_UPDATE: "chrome_update", INSTALL: "install", SHARED_MODULE_UPDATE: "shared_module_update", UPDATE: "update" },
-              OnRestartRequiredReason: { APP_UPDATE: "app_update", OS_UPDATE: "os_update", PERIODIC: "periodic" },
-              PlatformArch: { ARM: "arm", ARM64: "arm64", MIPS: "mips", MIPS64: "mips64", X86_32: "x86-32", X86_64: "x86-64" },
-              PlatformNaclArch: { ARM: "arm", MIPS: "mips", MIPS64: "mips64", X86_32: "x86-32", X86_64: "x86-64" },
-              PlatformOs: { ANDROID: "android", CROS: "cros", LINUX: "linux", MAC: "mac", OPENBSD: "openbsd", WIN: "win" },
-              RequestUpdateCheckStatus: { NO_UPDATE: "no_update", THROTTLED: "throttled", UPDATE_AVAILABLE: "update_available" }
-            },
-            loadTimes: function() {},
-            csi: function() {}
-          };
-        } catch {}
-
-        // Chuẩn hóa navigator.languages & navigator.language theo proxy động
-        try {
-          Object.defineProperty(navigator, "languages", {
-            get: () => langs || ["en-US", "en"],
-            configurable: true
-          });
-          Object.defineProperty(navigator, "language", {
-            get: () => loc || "en-US",
-            configurable: true
-          });
-        } catch {}
-
-        // Chuẩn hóa Permissions Query
-        try {
-          const originalQuery = window.navigator.permissions.query;
-          window.navigator.permissions.query = (parameters) => (
-            parameters.name === "notifications"
-              ? Promise.resolve({ state: Notification.permission === "denied" ? "denied" : "prompt" })
-              : originalQuery(parameters)
-          );
-        } catch {}
-
-        // Xóa sạch các biến quét CDP đặc trưng của DataDome / Cloudflare
-        try {
-          const removeCdc = () => {
-            for (const key of Object.keys(window)) {
-              if (key.match(/^cdc_/) || key.includes("puppeteer") || key.includes("__webdriver")) {
-                try { delete window[key]; } catch {}
-              }
-            }
-          };
-          removeCdc();
-          document.addEventListener("DOMContentLoaded", removeCdc);
-        } catch {}
-      }, geo.languages, geo.locale).catch(() => {});
     } catch {}
   }
 
@@ -731,24 +667,13 @@ export class AiAgentRunner {
 
       return true;
     } catch (err) {
-      console.warn(`(!) Lỗi gõ vào ${selector} (${err.message}) -> Kích hoạt Fallback DOM injection...`);
-      // Fallback: Nếu Puppeteer keyboard gặp timeout/lỗi, dùng JavaScript DOM evaluate trực tiếp để gán giá trị
+      console.warn(`(!) Lỗi gõ vào ${selector} (${err.message}) -> Kích hoạt gõ lại an toàn...`);
       try {
-        const fallbackSuccess = await page.evaluate((sel, val) => {
-          const element = document.querySelector(sel);
-          if (element) {
-            element.focus();
-            element.value = val;
-            element.dispatchEvent(new Event("input", { bubbles: true }));
-            element.dispatchEvent(new Event("change", { bubbles: true }));
-            element.dispatchEvent(new Event("blur", { bubbles: true }));
-            return true;
-          }
-          return false;
-        }, selector, textToType).catch(() => false);
-
-        if (fallbackSuccess) {
-          console.log(`⚡ [Fallback DOM Fill] Đã gán giá trị thành công vào ${selector} qua DOM!`);
+        const el = await page.$(selector);
+        if (el) {
+          await el.focus();
+          await page.keyboard.press("Backspace");
+          await page.keyboard.type(textToType, { delay: 60 });
           return true;
         }
       } catch {}
@@ -949,95 +874,84 @@ export class AiAgentRunner {
     return null;
   }
 
-  // Mô phỏng thao tác kéo chuột người thật (Human-like Mouse Drag với Ease-In-Out & Micro-jitter)
+  // Mô phỏng thao tác kéo chuột người thật 100% (Fitts's Law + Organic Hand-Eye Coordination + CDP Hardware Events)
   async _humanDragAndDrop(page, startX, startY, distanceX, targetFrame = null, btnSelector = null) {
     if (!page || page.isClosed()) return false;
 
     try {
-      const validDistance = Math.max(140, distanceX);
+      const validDistance = Math.min(265, Math.max(160, distanceX));
 
-      // Kích hoạt chuỗi Pointer/Mouse/Touch events trực tiếp trong context của Frame để đảm bảo 100% DataDome phản hồi
+      // 1. Focus vào Frame chứa Captcha
       if (targetFrame) {
-        targetFrame.evaluate(async ({ selector, dist }) => {
-          const btn = selector ? document.querySelector(selector) : (
-            document.querySelector("#slider, .slider-button, .slider-btn, [role='slider'], .slider, [class*='slider-handle'], [class*='slider-thumb'], .tc-slider-normal, .geetest_slider_button") ||
-            document.querySelector("div[class*='slider'] button, div[class*='slider'] div, button[class*='slider']")
-          );
-          if (!btn) return;
-
-          const r = btn.getBoundingClientRect();
-          const startX = r.left + r.width / 2;
-          const startY = r.top + r.height / 2;
-
-          const fire = (type, x, y, buttons = 1) => {
-            const pe = new PointerEvent(type, { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons, pointerId: 1, pointerType: "mouse", isPrimary: true });
-            const me = new MouseEvent(type, { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons });
-            const te = new TouchEvent(type.replace("pointer", "touch").replace("mouse", "touch"), {
-              bubbles: true,
-              cancelable: true,
-              view: window,
-              touches: [new Touch({ identifier: 1, target: btn, clientX: x, clientY: y, screenX: x, screenY: y, pageX: x, pageY: y })],
-              targetTouches: [new Touch({ identifier: 1, target: btn, clientX: x, clientY: y, screenX: x, screenY: y, pageX: x, pageY: y })],
-              changedTouches: [new Touch({ identifier: 1, target: btn, clientX: x, clientY: y, screenX: x, screenY: y, pageX: x, pageY: y })]
-            });
-            try { btn.dispatchEvent(pe); } catch {}
-            try { btn.dispatchEvent(me); } catch {}
-            try { btn.dispatchEvent(te); } catch {}
-            try { document.dispatchEvent(pe); } catch {}
-            try { document.dispatchEvent(me); } catch {}
-            try { window.dispatchEvent(pe); } catch {}
-            try { window.dispatchEvent(me); } catch {}
-          };
-
-          fire("pointerdown", startX, startY, 1);
-          fire("mousedown", startX, startY, 1);
-
-          const totalSteps = 35;
-          for (let i = 1; i <= totalSteps; i++) {
-            const p = i / totalSteps;
-            const ease = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
-            const curX = startX + dist * ease;
-            const curY = startY + Math.sin(p * Math.PI) * (Math.random() * 2 - 1);
-
-            fire("pointermove", curX, curY, 1);
-            fire("mousemove", curX, curY, 1);
-            await new Promise(res => setTimeout(res, 9));
-          }
-
-          await new Promise(res => setTimeout(res, 200));
-          fire("pointerup", startX + dist, startY, 0);
-          fire("mouseup", startX + dist, startY, 0);
-        }, { selector: btnSelector, dist: validDistance }).catch(() => {});
+        try { await targetFrame.focus(); } catch {}
       }
 
-      // 1. Di chuyển chuột CDP tới tâm nút trượt
-      await page.mouse.move(startX, startY, { steps: 6 });
+      // 2. Rê chuột tự nhiên vào tâm nút trượt (có tiếp cận từ vùng lân cận)
+      const approachStart = { x: startX - 30 + Math.random() * 60, y: startY - 20 + Math.random() * 40 };
+      await page.mouse.move(approachStart.x, approachStart.y);
       await this._safeSleep(80 + Math.floor(Math.random() * 60));
+      await page.mouse.move(startX, startY, { steps: 6 });
+      await this._safeSleep(180 + Math.floor(Math.random() * 100)); // Dừng lại nhìn nút trước khi nhấn
 
-      // 2. Nhấn giữ chuột trái
+      // 3. Nhấn giữ chuột trái (MouseDown) với độ trễ phản ứng người thật (150ms - 250ms)
       await page.mouse.down({ button: "left" });
-      await this._safeSleep(120 + Math.floor(Math.random() * 80));
+      await this._safeSleep(160 + Math.floor(Math.random() * 90));
 
-      // 3. Kéo theo đường cong gia tốc tự nhiên (EaseInOutCubic)
-      const totalSteps = 35 + Math.floor(Math.random() * 15);
+      // 4. Sinh quỹ đạo kéo vật lý sinh trắc học (75 - 105 bước, thời gian thực tế 1.4s - 2.0s)
+      const totalSteps = 75 + Math.floor(Math.random() * 30);
+      const pauseStep1 = Math.floor(totalSteps * (0.35 + Math.random() * 0.1)); // Điểm nghỉ tự nhiên 1
+      const pauseStep2 = Math.floor(totalSteps * (0.75 + Math.random() * 0.08)); // Điểm nghỉ tự nhiên 2
+
       for (let i = 1; i <= totalSteps; i++) {
-        const progress = i / totalSteps;
-        const ease = progress < 0.5
-          ? 4 * progress * progress * progress
-          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+        const t = i / totalSteps;
 
-        const stepX = startX + validDistance * ease;
-        const jitterY = Math.sin(progress * Math.PI) * (Math.random() * 3 - 1.5);
-        const stepY = startY + jitterY;
+        // Mô hình gia tốc sinh học:
+        // - 20% đầu: Tăng tốc chậm (Inertia & Static friction)
+        // - 60% giữa: Lướt nhanh đều tay
+        // - 20% cuối: Giảm tốc từ từ để căn mép đích (Fitts's Law Visual Deceleration)
+        let ease;
+        if (t < 0.20) {
+          ease = (t / 0.20) * (t / 0.20) * 0.20;
+        } else if (t < 0.80) {
+          const midT = (t - 0.20) / 0.60;
+          ease = 0.20 + midT * 0.65;
+        } else {
+          const endT = (t - 0.80) / 0.20;
+          ease = 0.85 + Math.sin((endT * Math.PI) / 2) * 0.15;
+        }
 
-        await page.mouse.move(stepX, stepY);
-        await this._safeSleep(7 + Math.floor(Math.random() * 8));
+        const stepX = startX + validDistance * Math.min(1, ease);
+        
+        // Rung lắc tự nhiên của bàn tay trên trục Y (Gaussian Micro-tremor: ±1.2px)
+        const handTremorY = Math.sin(t * Math.PI * 5) * (Math.random() * 2.0 - 1.0);
+        const handTremorX = (Math.random() - 0.5) * 0.7;
+        
+        const curX = stepX + handTremorX;
+        const curY = startY + handTremorY;
+
+        await page.mouse.move(curX, curY);
+
+        // Gián đoạn thị giác tự nhiên (Micro-stall 35ms - 70ms khi mắt quan sát tiến trình)
+        if (i === pauseStep1 || i === pauseStep2) {
+          await this._safeSleep(40 + Math.floor(Math.random() * 35));
+        }
+
+        // Biến thiên độ trễ từng bước chuột ngẫu nhiên (12ms - 24ms)
+        const stepDelay = Math.floor(12 + Math.random() * 12);
+        await this._safeSleep(stepDelay);
       }
 
-      // 4. Giữ chuột ở cuối thanh trượt cho server DataDome xác nhận
-      await this._safeSleep(300 + Math.floor(Math.random() * 100));
+      // 5. Pha căn chỉnh ở cuối rãnh (Micro-settle / Dwell at destination)
+      const finalX = startX + validDistance;
+      await page.mouse.move(finalX, startY, { steps: 4 });
+
+      // Giữ chuột ở cuối rãnh từ 400ms - 600ms để máy chủ DataDome nhận trọn vẹn sự kiện 100%
+      await this._safeSleep(420 + Math.floor(Math.random() * 180));
+
+      // 6. Nhả chuột (MouseUp)
       await page.mouse.up({ button: "left" });
-      await this._safeSleep(1200);
+      await this._safeSleep(1500);
+
       return true;
     } catch (err) {
       console.warn(`(!) Lỗi thao tác chuột HumanDrag: ${err.message}`);
@@ -1106,14 +1020,21 @@ export class AiAgentRunner {
             }
 
             if (btnHandle) {
-              // Tìm khung trượt (track)
-              const trackEl = await f.$("#track, .slider-track, .track, .slider_track, [class*='track'], [class*='slider-bar'], div[class*='container']");
-              if (trackEl) {
-                const tb = await trackEl.boundingBox();
-                if (tb && tb.width >= 160 && tb.width > btnBox.width + 30) {
-                  trackBox = tb;
+              // Tìm khung trượt (track) cha trực tiếp để tính cự ly chính xác 100%
+              try {
+                const trackData = await f.evaluate((btn) => {
+                  const parent = btn.parentElement || btn.closest(".slider, .slider-wrapper, .slider-container, #captcha__slider, #track, div");
+                  if (parent) {
+                    const r = parent.getBoundingClientRect();
+                    return { width: r.width, height: r.height, left: r.left, top: r.top };
+                  }
+                  return null;
+                }, btnHandle);
+
+                if (trackData && trackData.width >= 150 && trackData.width <= 420) {
+                  trackBox = trackData;
                 }
-              }
+              } catch {}
 
               // Kiểm tra xem có phải dạng PUZZLE GHÉP MẢNH thực sự không (Canvas chữ nhật >= 240x110 hoặc thẻ img puzzle lớn)
               const canvasEl = await f.$("canvas");
@@ -1195,14 +1116,19 @@ export class AiAgentRunner {
 
       // 2. Nếu là thanh trượt vuốt DataDome (Slide Right to Unlock) không có puzzle
       if (!dragDistance) {
-        if (trackBox && trackBox.width > btnBox.width + 40) {
-          dragDistance = trackBox.width - btnBox.width - 4;
-          console.log(`🔄 [DataDome Swipe] Thanh trượt dạng Slide Right to Unlock, tính toán độ dài track: ${Math.round(dragDistance)}px`);
+        if (trackBox && trackBox.width > btnBox.width + 15 && trackBox.width <= 380) {
+          // Kéo chạm khít mép phải để kích hoạt 100% trigger của DataDome
+          dragDistance = (trackBox.width - btnBox.width) + 2;
+          console.log(`🔄 [DataDome Swipe] Đo rãnh trượt (${Math.round(trackBox.width)}px - Nút ${Math.round(btnBox.width)}px), cự ly kích hoạt 100%: ${Math.round(dragDistance)}px`);
         } else {
-          dragDistance = 260 + Math.floor(Math.random() * 20); // Độ dài tiêu chuẩn DataDome
+          // Cự ly chuẩn DataDome tiêu chuẩn (Rãnh 280px - Nút 63px + 2px = 219px)
+          dragDistance = 219 + Math.floor(Math.random() * 4);
           console.log(`🔄 [DataDome Swipe] Thanh trượt dạng Slide Right to Unlock, kéo tiêu chuẩn: ${Math.round(dragDistance)}px`);
         }
       }
+
+      // Bắt buộc chuẩn hoá khoảng cách trong ranh giới an toàn 160px - 265px
+      dragDistance = Math.min(265, Math.max(160, dragDistance));
 
       console.log(`⚡ [Human Mouse Drag] Đang thực hiện kéo thanh trượt (Từ ${Math.round(startX)},${Math.round(startY)} -> +${Math.round(dragDistance)}px)...`);
       await this._humanDragAndDrop(page, startX, startY, dragDistance, targetFrame);
@@ -1245,15 +1171,28 @@ export class AiAgentRunner {
                                     body.includes("err_connection_closed") ||
                                     body.includes("captcha-delivery.com didn't send any data");
 
-              const hasText = body.includes("why is this step needed") ||
-                              body.includes("unusual activity from your device or network") ||
-                              body.includes("verification required") ||
-                              body.includes("slide right to secure your access") ||
-                              body.includes("audio verification instead") ||
-                              body.includes("captcha-delivery");
+              // Chỉ coi là có Captcha khi iframe/element thực sự HIỂN THỊ (visible) và có kích thước > 0
+              const visibleCaptchaIframe = Array.from(document.querySelectorAll("iframe[src*='captcha-delivery'], iframe[src*='geo.captcha']")).some(el => {
+                const r = el.getBoundingClientRect();
+                return r.width > 50 && r.height > 50 && !el.hidden && window.getComputedStyle(el).display !== 'none';
+              });
 
-              const hasContainer = !!document.querySelector("#ddv1-captcha-container, .datadome-container, iframe[src*='captcha-delivery'], #captcha__audio__button, #captcha__audio, #slider, .slider");
-              return { detected: hasText || hasContainer, isNetworkDead };
+              const visibleSliderBtn = Array.from(document.querySelectorAll("#captcha__slider__btn, .slider-button, .slider-btn, #slider, .geetest_slider_button")).some(el => {
+                const r = el.getBoundingClientRect();
+                return r.width > 10 && r.height > 10 && !el.hidden && window.getComputedStyle(el).display !== 'none';
+              });
+
+              const visibleAudioBtn = Array.from(document.querySelectorAll("#captcha__audio__button, #captcha__audio")).some(el => {
+                const r = el.getBoundingClientRect();
+                return r.width > 10 && r.height > 10 && !el.hidden && window.getComputedStyle(el).display !== 'none';
+              });
+
+              const hasExplicitText = body.includes("slide right to secure your access") ||
+                                      body.includes("why is this step needed") ||
+                                      (body.includes("verification required") && !document.querySelector("#email"));
+
+              const detected = visibleCaptchaIframe || visibleSliderBtn || visibleAudioBtn || hasExplicitText;
+              return { detected, isNetworkDead };
             });
 
             if (res.isNetworkDead) {
@@ -1310,10 +1249,11 @@ export class AiAgentRunner {
       if (selectedMode === "slider" || selectedMode === "auto") {
         const sliderSolved = await this._solveDataDomeSlider(page);
         if (sliderSolved) {
-          // Chờ kiểm tra xem captcha đã biến mất chưa
+          console.log("⏳ [Chờ Phản Hồi DataDome] Đang đợi máy chủ Captcha xác nhận kết quả (Tối đa 15s)...");
+          // Chờ kiểm tra xem captcha đã biến mất chưa (tối đa 15s cho đường truyền Proxy)
           const verifyStart = Date.now();
-          while (Date.now() - verifyStart < 8000) {
-            await this._safeSleep(1200);
+          while (Date.now() - verifyStart < 15000) {
+            await this._safeSleep(1500);
             if (!page || page.isClosed()) break;
             const stillActive = await checkCaptchaDetected();
             if (!stillActive) {
@@ -1342,8 +1282,6 @@ export class AiAgentRunner {
                 for (const b of specificBtns) {
                   if (b && !b.hidden && b.getBoundingClientRect().width > 0) {
                     b.scrollIntoView({ behavior: "smooth", block: "center" });
-                    b.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-                    b.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
                     b.click();
                     return true;
                   }
@@ -1353,8 +1291,6 @@ export class AiAgentRunner {
                   const audioBtn = headerButtons[1];
                   if (audioBtn) {
                     audioBtn.scrollIntoView({ behavior: "smooth", block: "center" });
-                    audioBtn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-                    audioBtn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
                     audioBtn.click();
                     return true;
                   }
@@ -1402,8 +1338,6 @@ export class AiAgentRunner {
               for (const b of playCandidates) {
                 if (b && !b.hidden && b.getBoundingClientRect().width > 0) {
                   b.scrollIntoView({ behavior: "smooth", block: "center" });
-                  b.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-                  b.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
                   b.click();
                   return true;
                 }
@@ -1460,45 +1394,40 @@ export class AiAgentRunner {
           console.log(`🎯 [AI Speech-to-Text] Đã trích xuất thành công: [ \x1b[32m${recognizedDigits}\x1b[0m ]`);
           console.log(`-> Điền mã [${recognizedDigits}] vào form xác thực và gửi...`);
 
-          const contexts = getAllContexts();
-          for (const ctx of contexts) {
+          // 1. Nhập phím vào ô nhập số Captcha bằng CDP Keyboard
+          try {
+            const firstInput = await page.$("input[type='text'], input[type='tel'], input[type='number'], #captcha__audio input, input[name*='captcha'], input[id*='audio']");
+            if (firstInput) {
+              await firstInput.click();
+              await this._safeSleep(150);
+              for (const digit of recognizedDigits) {
+                await page.keyboard.type(digit, { delay: this._randomDelay(80, 140) });
+                await this._safeSleep(40);
+              }
+            }
+          } catch {}
+
+          // 2. Click nút xác nhận Verify / Submit
+          await this._safeSleep(400);
+          const contextsAfter = getAllContexts();
+          for (const ctx of contextsAfter) {
             try {
-              const filled = await ctx.evaluate((digits) => {
-                const inputs = Array.from(document.querySelectorAll("input[type='text'], input[type='tel'], input[type='number'], #captcha__audio input, input[name*='captcha'], input[id*='audio']"));
-                if (inputs.length === 0) return false;
-                if (inputs.length >= 6) {
-                  for (let i = 0; i < digits.length && i < inputs.length; i++) {
-                    const inp = inputs[i];
-                    inp.focus();
-                    inp.value = digits[i];
-                    inp.dispatchEvent(new Event("input", { bubbles: true }));
-                    inp.dispatchEvent(new Event("change", { bubbles: true }));
-                  }
-                } else {
-                  const mainInput = inputs[0];
-                  mainInput.focus();
-                  mainInput.value = digits;
-                  mainInput.dispatchEvent(new Event("input", { bubbles: true }));
-                  mainInput.dispatchEvent(new Event("change", { bubbles: true }));
-                }
+              await ctx.evaluate(() => {
                 const submitBtns = Array.from(document.querySelectorAll(".audio-captcha-submit-button, div.audio-captcha-submit-container > button, #captcha__audio button[type='submit'], [aria-label*='verify' i], button[type='submit']"));
                 for (const btn of submitBtns) {
-                  btn.scrollIntoView({ behavior: "smooth", block: "center" });
-                  btn.click();
-                  return true;
+                  if (btn && !btn.hidden && btn.getBoundingClientRect().width > 0) {
+                    btn.scrollIntoView({ behavior: "smooth", block: "center" });
+                    btn.click();
+                    return true;
+                  }
                 }
                 const form = document.querySelector("#captcha__audio form, form");
                 if (form) {
                   form.requestSubmit();
                   return true;
                 }
-                return true;
-              }, recognizedDigits);
-
-              if (filled) {
-                console.log("✅ [Captcha Submitted] Đã điền mã và gửi xác nhận thành công!");
-                break;
-              }
+                return false;
+              });
             } catch {}
           }
 
@@ -2130,26 +2059,15 @@ export class AiAgentRunner {
     }, otpSelector).catch(() => {});
     await this._safeSleep(500);
 
-    // Gõ mã OTP với dispatch event đầy đủ
+    // Gõ mã OTP bằng bàn phím người thật
     await otpEl.click({ clickCount: 3 });
     await page.keyboard.press("Backspace");
     await this._safeSleep(150);
 
     for (const char of code) {
-      await page.keyboard.type(char, { delay: this._randomDelay(40, 80) });
+      await page.keyboard.type(char, { delay: this._randomDelay(50, 90) });
     }
-
-    // Set trực tiếp giá trị vào DOM để đảm bảo 100% không bị rỗng
-    await page.evaluate((selector, val) => {
-      const el = document.querySelector(selector);
-      if (el) {
-        el.value = val;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-        el.dispatchEvent(new Event("blur", { bubbles: true }));
-      }
-    }, otpSelector, code).catch(() => {});
-    await this._safeSleep(1500);
+    await this._safeSleep(1200);
 
     // Bấm nút Continue màu xanh hoặc submit form
     console.log("-> Bấm nút 'Continue' để xác nhận mã TOTP...");
@@ -2488,7 +2406,7 @@ export class AiAgentRunner {
         longitude: proxyGeo.lon,
         accuracy: 15
       };
-      baseFp.webrtc = "auto";
+      baseFp.webrtc = "block"; // Khóa chặt WebRTC không để lộ IP thật (Vietnam) khi dùng Proxy
       baseFp.noise = {
         audio: { enabled: false },
         canvas: { enabled: false },
@@ -2502,6 +2420,8 @@ export class AiAgentRunner {
       // BƯỚC 3: TẠO PROFILE MỚI THUỘC NHÓM 'GitHub-Auto'
       const sessionSuffix = Date.now().toString().slice(-4);
       let formattedProxy = null;
+      let registeredProxyId = null;
+
       if (chosenProxy) {
         if (chosenProxy.proxyString) {
           formattedProxy = chosenProxy.proxyString;
@@ -2515,6 +2435,27 @@ export class AiAgentRunner {
             formattedProxy = `${kind}://${chosenProxy.host}:${chosenProxy.port}`;
           }
         }
+
+        // Tự động đăng ký Proxy vào ShardBrowser để Launcher gán bound_proxy chuẩn xác
+        if (chosenProxy.id && !String(chosenProxy.id).startsWith("file_")) {
+          registeredProxyId = chosenProxy.id;
+        } else {
+          try {
+            const { data: savedProxy } = await axios.post(`${this._launcherApiUrl}/proxies`, {
+              name: `Auto-${chosenProxy.host}:${chosenProxy.port}`,
+              folder: "GitHub-Auto",
+              kind: chosenProxy.kind || "http",
+              host: chosenProxy.host,
+              port: Number(chosenProxy.port),
+              username: chosenProxy.username || "",
+              password: chosenProxy.password || "",
+            }, { headers: this._headers, timeout: 3000 });
+            if (savedProxy && savedProxy.id) {
+              registeredProxyId = savedProxy.id;
+              chosenProxy.id = savedProxy.id;
+            }
+          } catch {}
+        }
       }
 
       const profilePayload = {
@@ -2522,8 +2463,8 @@ export class AiAgentRunner {
         folder: "GitHub-Auto",
         notes: `Tách biệt hoàn toàn | Proxy: ${formattedProxy || 'Direct'} | Ping: ${chosenProxy?._verifiedLatency ? `${chosenProxy._verifiedLatency}ms` : '<1.5s'} | Time: ${new Date().toLocaleTimeString()}`,
         proxy: formattedProxy,
-        proxy_id: chosenProxy?.id && !String(chosenProxy.id).startsWith("file_") ? chosenProxy.id : null,
-        webrtc: "auto",
+        proxy_id: registeredProxyId,
+        webrtc: "block", // Chặn tuyệt đối WebRTC STUN query làm rò rỉ IP máy thật
         fingerprint: baseFp,
         noise: {
           audio: { enabled: false },
@@ -2873,19 +2814,37 @@ export class AiAgentRunner {
 
           try {
             if (!this._githubPage.url().includes("/signup")) {
-              // Tìm nút Sign up trên Header
-              let headerSignUpBtn = await this._githubPage.$("header a[href*='/signup'], a.HeaderMenu-link--sign-up, a[href*='/signup'].HeaderMenu-link");
+              // Tìm nút Sign up trên Header (chỉ lấy nút ở đầu trang y < 150)
+              const candidates = await this._githubPage.$$("header a[href*='/signup'], a.HeaderMenu-link--sign-up, header a.HeaderMenu-link, a[href*='/signup']");
+              let headerSignUpBtn = null;
+              for (const c of candidates) {
+                const b = await c.boundingBox().catch(() => null);
+                if (b && b.width > 20 && b.height > 10 && b.y < 150 && b.x > 300) {
+                  headerSignUpBtn = c;
+                  break;
+                }
+              }
 
               // Nếu menu responsive mobile đang ẩn nút Sign up
               if (!headerSignUpBtn) {
                 const hamburgerBtn = await this._githubPage.$("button[aria-label='Toggle navigation'], .HeaderMenu-toggle-button, button.js-details-target");
                 if (hamburgerBtn) {
-                  try {
-                    console.log("-> Mở menu điều hướng Header...");
-                    await hamburgerBtn.click({ delay: 60 });
-                    await this._safeSleep(800);
-                    headerSignUpBtn = await this._githubPage.$("a[href*='/signup']");
-                  } catch {}
+                  const hBox = await hamburgerBtn.boundingBox().catch(() => null);
+                  if (hBox && hBox.y < 150) {
+                    try {
+                      console.log("-> Mở menu điều hướng Header...");
+                      await hamburgerBtn.click({ delay: 60 });
+                      await this._safeSleep(800);
+                      const subCandidates = await this._githubPage.$$("a[href*='/signup']");
+                      for (const sc of subCandidates) {
+                        const sb = await sc.boundingBox().catch(() => null);
+                        if (sb && sb.width > 20 && sb.height > 10 && sb.y < 500) {
+                          headerSignUpBtn = sc;
+                          break;
+                        }
+                      }
+                    } catch {}
+                  }
                 }
               }
 
@@ -2959,11 +2918,6 @@ export class AiAgentRunner {
               const body = (document.body ? document.body.innerText : "") + " " + (document.title || "");
               const lower = body.toLowerCase();
 
-              // CHỈ COI LÀ CÓ INPUT KHI THỰC SỰ ĐANG Ở TRANG SIGNUP
-              const signupEmailInput = !!document.querySelector("#email, input[name='user[email]'], input[autocomplete='email']");
-              const hasPasswordInput = !!document.querySelector("#password, input[name='user[password]']");
-              const hasEmailInput = signupEmailInput || hasPasswordInput;
-
               // 1. Kiểm tra Hard Block / Rate Limit (ƯU TIÊN HÀNG ĐẦU)
               const isRateLimited = lower.includes("access is temporarily restricted") ||
                                     lower.includes("access restricted") ||
@@ -2974,14 +2928,28 @@ export class AiAgentRunner {
                                     lower.includes("tạm thời hạn chế truy cập") ||
                                     lower.includes("unable to verify your captcha response");
 
-              // 2. Kiểm tra DataDome Geo Captcha (Chỉ khi có khung Captcha thực sự và KHÔNG PHẢI là Hard Block)
-              const hasCaptchaIframe = !!document.querySelector("#ddv1-captcha-container, iframe[src*='captcha-delivery'], iframe[src*='geo.captcha'], #captcha__audio__button, #captcha__slider");
+              // 2. Kiểm tra ô input Email / Password có hiển thị trên màn hình không
+              const emailEl = document.querySelector("#email, input[name='user[email]'], input[autocomplete='email']");
+              const passEl = document.querySelector("#password, input[name='user[password]']");
+              const hasEmailInput = !!(emailEl && (emailEl.offsetWidth > 0 || emailEl.getBoundingClientRect().width > 0)) ||
+                                    !!(passEl && (passEl.offsetWidth > 0 || passEl.getBoundingClientRect().width > 0));
+
+              // 3. Kiểm tra DataDome Geo Captcha (Chỉ khi có iframe hoặc nút Slider THỰC SỰ HIỂN THỊ TRÊN MÀN HÌNH)
+              const visibleCaptchaIframe = Array.from(document.querySelectorAll("iframe[src*='captcha-delivery'], iframe[src*='geo.captcha'], iframe[src*='arkoselabs']")).some(el => {
+                const r = el.getBoundingClientRect();
+                return r.width > 50 && r.height > 50 && !el.hidden && window.getComputedStyle(el).display !== 'none';
+              });
+
+              const visibleSlider = Array.from(document.querySelectorAll("#captcha__slider__btn, #captcha__audio__button, #captcha__slider, .slider-button, .slider-btn, .geetest_slider_button")).some(el => {
+                const r = el.getBoundingClientRect();
+                return r.width > 10 && r.height > 10 && !el.hidden && window.getComputedStyle(el).display !== 'none';
+              });
+
               const isCaptcha = !isRateLimited && (
-                hasCaptchaIframe ||
-                lower.includes("why is this step needed") ||
+                visibleCaptchaIframe ||
+                visibleSlider ||
                 lower.includes("slide right to secure your access") ||
-                lower.includes("verification required") ||
-                lower.includes("geo.captcha-delivery.com")
+                (!hasEmailInput && (lower.includes("why is this step needed") || lower.includes("verification required") || lower.includes("geo.captcha-delivery.com")))
               );
 
               // Kiểm tra lỗi Proxy chặn CDN GitHub (Please enable JS and disable any ad blocker)
@@ -3023,6 +2991,13 @@ export class AiAgentRunner {
               }
               console.warn("\n⚠️ [PROXY CHẶN CDN GITHUB]: Proxy hiện tại đang chặn hoặc không tải được JavaScript/CDN của GitHub ('Please enable JS and disable any ad blocker')!");
               throw new Error("PROXY_BLOCKED_CDN: Proxy này không tải được file JavaScript của GitHub. Hệ thống sẽ tự động chuyển sang Proxy khác!");
+            }
+
+            // ƯU TIÊN SỐ 1: NẾU FORM ĐĂNG KÝ ĐÃ HIỂN THỊ TRÊN MÀN HÌNH -> VÀO ĐIỀN FORM NGAY!
+            if (pageState.hasEmailInput && !pageState.isCaptcha) {
+              isFormReady = true;
+              console.log(`✅ [Trang Sẵn Sàng] Form đăng ký GitHub đã tải hoàn tất (${pageState.currentUrl}) và sẵn sàng nhập liệu!`);
+              break;
             }
 
             if (pageState.isCaptcha) {
@@ -3176,23 +3151,29 @@ export class AiAgentRunner {
         const pageCheck = await this._githubPage.evaluate(() => {
           const body = (document.body ? document.body.innerText : "") + " " + (document.title || "");
           const lower = body.toLowerCase();
-          const isCaptcha = lower.includes("why is this step needed") ||
-                            lower.includes("we detected unusual activity from your device or network") ||
-                            lower.includes("slide right to secure your access") ||
-                            lower.includes("verification required") ||
-                            lower.includes("geo.captcha-delivery.com") ||
-                            !!document.querySelector("#ddv1-captcha-container") ||
-                            !!document.querySelector("#captcha__audio__button") ||
-                            !!document.querySelector("iframe[src*='captcha-delivery']") ||
-                            !!document.querySelector("iframe[src*='arkoselabs']");
 
-          const isRateLimited = !isCaptcha && (
-            lower.includes("truy cập tạm thời bị hạn chế") ||
-            lower.includes("tạm thời hạn chế truy cập") ||
-            lower.includes("access is temporarily restricted") ||
-            lower.includes("access restricted") ||
-            lower.includes("temporarily restricted") ||
-            lower.includes("unable to verify your captcha response")
+          const isRateLimited = lower.includes("truy cập tạm thời bị hạn chế") ||
+                                lower.includes("tạm thời hạn chế truy cập") ||
+                                lower.includes("access is temporarily restricted") ||
+                                lower.includes("access restricted") ||
+                                lower.includes("temporarily restricted") ||
+                                lower.includes("unable to verify your captcha response");
+
+          const visibleCaptchaIframe = Array.from(document.querySelectorAll("iframe[src*='captcha-delivery'], iframe[src*='geo.captcha'], iframe[src*='arkoselabs']")).some(el => {
+            const r = el.getBoundingClientRect();
+            return r.width > 50 && r.height > 50 && !el.hidden && window.getComputedStyle(el).display !== 'none';
+          });
+
+          const visibleSlider = Array.from(document.querySelectorAll("#captcha__slider__btn, #captcha__audio__button, #captcha__slider, .slider-button, .slider-btn")).some(el => {
+            const r = el.getBoundingClientRect();
+            return r.width > 10 && r.height > 10 && !el.hidden && window.getComputedStyle(el).display !== 'none';
+          });
+
+          const isCaptcha = !isRateLimited && (
+            visibleCaptchaIframe ||
+            visibleSlider ||
+            lower.includes("slide right to secure your access") ||
+            lower.includes("why is this step needed")
           );
 
           return { isCaptcha, isRateLimited };
