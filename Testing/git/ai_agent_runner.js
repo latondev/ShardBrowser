@@ -454,20 +454,81 @@ export class AiAgentRunner {
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
   }
 
-  // Ẩn danh CDP / Anti-Bot Stealth Evasions (Xoá triệt để dấu hiệu automation & đồng bộ Timezone/Locale)
+  // Tự động nhận diện Timezone, Locale, Geolocation động 100% theo IP của từng Proxy
+  async _resolveProxyGeoInfo(proxy) {
+    let timezone = "America/New_York";
+    let countryCode = "US";
+    let lat = 40.7128;
+    let lon = -74.0060;
+
+    if (!proxy || !proxy.host) {
+      return { timezone: "Asia/Ho_Chi_Minh", countryCode: "VN", locale: "vi-VN", languages: ["vi-VN", "vi", "en-US", "en"], lat: 21.0285, lon: 105.8542 };
+    }
+
+    try {
+      // 1. Tra cứu thông tin GeoIP thực tế từ máy chủ ip-api
+      const res = await axios.get(`http://ip-api.com/json/${proxy.host}?fields=status,country,countryCode,timezone,lat,lon`, { timeout: 3000 }).catch(() => null);
+      if (res?.data && res.data.status === "success") {
+        timezone = res.data.timezone || timezone;
+        countryCode = (res.data.countryCode || "US").toUpperCase();
+        lat = res.data.lat || lat;
+        lon = res.data.lon || lon;
+      }
+    } catch {}
+
+    // 2. Nếu không lấy được qua API, tra cứu theo trường country / folder có sẵn
+    if (countryCode === "US" && (proxy.country || proxy.folder)) {
+      const hint = (proxy.country || proxy.folder || "").trim().toUpperCase();
+      if (hint === "VN" || hint.includes("VIETNAM")) countryCode = "VN";
+      else if (hint === "GB" || hint === "UK") countryCode = "GB";
+      else if (hint === "DE" || hint.includes("GERMAN")) countryCode = "DE";
+      else if (hint === "FR" || hint.includes("FRANCE")) countryCode = "FR";
+      else if (hint === "JP" || hint.includes("JAPAN")) countryCode = "JP";
+      else if (hint === "SG" || hint.includes("SINGAPORE")) countryCode = "SG";
+      else if (hint === "CA" || hint.includes("CANADA")) countryCode = "CA";
+      else if (hint === "AU" || hint.includes("AUSTRALIA")) countryCode = "AU";
+    }
+
+    // 3. Mapping Country Code -> Timezone & Locale chuẩn
+    const map = {
+      VN: { tz: "Asia/Ho_Chi_Minh", loc: "vi-VN", langs: ["vi-VN", "vi", "en-US", "en"], lat: 21.0285, lon: 105.8542 },
+      US: { tz: timezone || "America/New_York", loc: "en-US", langs: ["en-US", "en"], lat: lat || 40.7128, lon: lon || -74.0060 },
+      GB: { tz: "Europe/London", loc: "en-GB", langs: ["en-GB", "en"], lat: 51.5074, lon: -0.1278 },
+      DE: { tz: "Europe/Berlin", loc: "de-DE", langs: ["de-DE", "de", "en-US", "en"], lat: 52.5200, lon: 13.4050 },
+      FR: { tz: "Europe/Paris", loc: "fr-FR", langs: ["fr-FR", "fr", "en-US", "en"], lat: 48.8566, lon: 2.3522 },
+      JP: { tz: "Asia/Tokyo", loc: "ja-JP", langs: ["ja-JP", "ja", "en-US", "en"], lat: 35.6762, lon: 139.6503 },
+      SG: { tz: "Asia/Singapore", loc: "en-SG", langs: ["en-SG", "en", "zh-SG"], lat: 1.3521, lon: 103.8198 },
+      CA: { tz: "America/Toronto", loc: "en-CA", langs: ["en-CA", "en-US", "en"], lat: 43.6532, lon: -79.3832 },
+      AU: { tz: "Australia/Sydney", loc: "en-AU", langs: ["en-AU", "en-US", "en"], lat: -33.8688, lon: 151.2093 },
+    };
+
+    const target = map[countryCode] || { tz: timezone, loc: "en-US", langs: ["en-US", "en"], lat, lon };
+    return {
+      timezone: target.tz,
+      countryCode,
+      locale: target.loc,
+      languages: target.langs,
+      lat: target.lat,
+      lon: target.lon,
+    };
+  }
+
+  // Ẩn danh CDP / Anti-Bot Stealth Evasions (Xoá triệt để dấu hiệu automation & đồng bộ Timezone/Locale theo Proxy động)
   async _injectStealthEvasions(page) {
     if (!page || page.isClosed()) return;
 
     try {
-      // 1. Áp dụng CDP Emulation Override (Timezone & Locale theo US / Proxy chuẩn)
+      const geo = this._activeProxyGeo || { timezone: "America/New_York", locale: "en-US", languages: ["en-US", "en"] };
+
+      // 1. Áp dụng CDP Emulation Override (Timezone & Locale theo Proxy động)
       try {
         const client = await page.target().createCDPSession();
-        await client.send("Emulation.setTimezoneOverride", { timezoneId: "America/New_York" }).catch(() => {});
-        await client.send("Emulation.setLocaleOverride", { locale: "en-US" }).catch(() => {});
+        await client.send("Emulation.setTimezoneOverride", { timezoneId: geo.timezone }).catch(() => {});
+        await client.send("Emulation.setLocaleOverride", { locale: geo.locale }).catch(() => {});
       } catch {}
 
       // 2. Tiêm script xóa bỏ hoàn toàn dấu vết Puppeteer / Webdriver / CDP vào trước khi DOM nạp
-      await page.evaluateOnNewDocument(() => {
+      await page.evaluateOnNewDocument((langs, loc) => {
         // Xóa navigator.webdriver
         try {
           Object.defineProperty(navigator, "webdriver", {
@@ -494,10 +555,14 @@ export class AiAgentRunner {
           };
         } catch {}
 
-        // Chuẩn hóa navigator.languages & navigator.plugins
+        // Chuẩn hóa navigator.languages & navigator.language theo proxy động
         try {
           Object.defineProperty(navigator, "languages", {
-            get: () => ["en-US", "en"],
+            get: () => langs || ["en-US", "en"],
+            configurable: true
+          });
+          Object.defineProperty(navigator, "language", {
+            get: () => loc || "en-US",
             configurable: true
           });
         } catch {}
@@ -524,7 +589,7 @@ export class AiAgentRunner {
           removeCdc();
           document.addEventListener("DOMContentLoaded", removeCdc);
         } catch {}
-      }).catch(() => {});
+      }, geo.languages, geo.locale).catch(() => {});
     } catch {}
   }
 
@@ -2366,18 +2431,21 @@ export class AiAgentRunner {
         }
       } catch {}
 
-      // Đồng bộ hóa triệt để: Timezone, Geo, Language khớp 100% với US / Proxy; WebRTC chuẩn auto (không block làm lộ bot)
-      const isVnProxy = (chosenProxy?.country || "").toLowerCase().includes("vn") || (chosenProxy?.folder || "").toLowerCase() === "vn";
-      baseFp.timezone = isVnProxy ? "Asia/Ho_Chi_Minh" : "America/New_York";
+      // Đồng bộ hóa triệt để: Timezone, Geo, Language khớp 100% theo quốc gia thực tế của Proxy
+      const proxyGeo = await this._resolveProxyGeoInfo(chosenProxy);
+      this._activeProxyGeo = proxyGeo;
+      console.log(`🌐 [Proxy Geo Sync] Quốc gia: [${proxyGeo.countryCode}] | Timezone: [${proxyGeo.timezone}] | Locale: [${proxyGeo.locale}]`);
+
+      baseFp.timezone = proxyGeo.timezone;
       baseFp.navigator = {
         ...(baseFp.navigator || {}),
-        language: isVnProxy ? "vi-VN" : "en-US",
-        languages: isVnProxy ? ["vi-VN", "vi", "en-US", "en"] : ["en-US", "en"]
+        language: proxyGeo.locale,
+        languages: proxyGeo.languages
       };
       baseFp.geolocation = {
         mode: "prompt",
-        latitude: isVnProxy ? 21.0285 : 40.7128,
-        longitude: isVnProxy ? 105.8542 : -74.0060,
+        latitude: proxyGeo.lat,
+        longitude: proxyGeo.lon,
         accuracy: 15
       };
       baseFp.webrtc = "auto";
