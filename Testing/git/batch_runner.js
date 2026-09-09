@@ -31,15 +31,17 @@ export class BatchRunner {
   _failedCount = 0;
   _currentRunner = null;
   _isStopping = false;
+  _headless = false;
   _history = [];
 
-  constructor(totalTarget = 0, cooldownSeconds = 30, proxyMode = "shard", proxyGroup = "all", emailService = "gmail") {
+  constructor(totalTarget = 0, cooldownSeconds = 30, proxyMode = "shard", proxyGroup = "all", emailService = "gmail", headless = false) {
     const num = Number(totalTarget);
     this._totalTarget = (!num || num <= 0) ? Infinity : num;
     this._cooldownSeconds = Number(cooldownSeconds) || 30;
     this._proxyMode = proxyMode || "shard";
     this._proxyGroup = proxyGroup || "all";
     this._emailService = emailService || "gmail";
+    this._headless = Boolean(headless);
 
     // Lắng nghe tín hiệu dừng an toàn (Ctrl + C)
     process.on("SIGINT", async () => {
@@ -142,6 +144,7 @@ export class BatchRunner {
         proxyGroup: this._proxyGroup,
         proxy: isInlineProxy ? this._proxyMode : undefined,
         emailService: this._emailService,
+        headless: this._headless,
       });
       this._currentRunner = runnerInstance;
 
@@ -154,6 +157,7 @@ export class BatchRunner {
           proxyMode: isInlineProxy ? "shard" : this._proxyMode,
           proxyGroup: this._proxyGroup,
           proxy: isInlineProxy ? this._proxyMode : undefined,
+          headless: this._headless,
         });
 
         isSuccess = true;
@@ -176,11 +180,9 @@ export class BatchRunner {
         if (err.message && err.message.includes("EMAIL_ALREADY_EXISTS")) {
           console.warn(`\n🔄 [EMAIL ĐÃ TỒN TẠI]: Tự động bỏ qua lượt này và làm lại tài khoản #${index} mới từ đầu...`);
           // Không tăng index
-        } else if (err.message && (err.message.includes("GITHUB_RATE_LIMITED") || err.message.includes("Rate Limit"))) {
-          this._failedCount++;
-          console.warn(`\n⚠️ [RATE LIMIT IP]: ${err.message}`);
-          console.warn("👉 Khuyến nghị: Hãy dùng Proxy Shard/Proxy Xoay hoặc tăng cooldown để tránh bị hạn chế IP.");
-          index++;
+        } else if (err.message && (err.message.includes("PROXY_BLOCKED_CDN") || err.message.includes("PROXY_CAPTCHA_NETWORK_ERROR") || err.message.includes("GITHUB_RATE_LIMITED") || err.message.includes("Rate Limit"))) {
+          console.warn(`\n🔄 [TỰ ĐỘNG ĐỔI PROXY] (${err.message}) -> Đang chuyển ngay sang Proxy sạch tiếp theo...`);
+          // Không tăng index để tiếp tục làm lại tài khoản này trên proxy mới
         } else {
           this._failedCount++;
           console.error(`\n❌ [LỖI TÀI KHOẢN #${index}]: ${err.message} | Thời gian: ${this._formatTime(accTime)}`);
@@ -217,6 +219,7 @@ function parseBatchArgs() {
   let proxyMode = process.env.PROXY_MODE || "shard";
   let proxyGroup = process.env.PROXY_GROUP || "all";
   let emailService = process.env.EMAIL_SERVICE || "gmail";
+  let headless = process.env.HEADLESS === "1" || false;
 
   for (const arg of args) {
     if (arg.startsWith("--count=")) {
@@ -246,6 +249,10 @@ function parseBatchArgs() {
       emailService = "mailtm";
     } else if (arg.startsWith("--email=")) {
       emailService = arg.replace(/^--email=/, "").trim();
+    } else if (arg === "--headless" || arg === "-h") {
+      headless = true;
+    } else if (arg === "--no-headless" || arg === "--headful") {
+      headless = false;
     } else if (/^\d+$/.test(arg)) {
       if (targetCount === 0) targetCount = parseInt(arg, 10);
       else cooldownSec = parseInt(arg, 10);
@@ -254,7 +261,7 @@ function parseBatchArgs() {
     }
   }
 
-  return { targetCount, cooldownSec, proxyMode, proxyGroup, emailService };
+  return { targetCount, cooldownSec, proxyMode, proxyGroup, emailService, headless };
 }
 
 async function main() {

@@ -36,9 +36,10 @@ export class BatchUnlimitMailRunner {
   _failedCount = 0;
   _currentRunner = null;
   _isStopping = false;
+  _headless = false;
   _history = [];
 
-  constructor(totalTarget = 0, cooldownSeconds = 30, proxyMode = "shard", proxyGroup = "all", profile = null, cloneFrom = null, captchaMode = "audio") {
+  constructor(totalTarget = 0, cooldownSeconds = 30, proxyMode = "shard", proxyGroup = "all", profile = null, cloneFrom = null, captchaMode = "audio", headless = false) {
     const num = Number(totalTarget);
     this._totalTarget = (!num || num <= 0) ? Infinity : num;
     this._cooldownSeconds = Number(cooldownSeconds) || 30;
@@ -47,6 +48,7 @@ export class BatchUnlimitMailRunner {
     this._profile = profile || null;
     this._cloneFrom = cloneFrom || null;
     this._captchaMode = captchaMode || "audio";
+    this._headless = Boolean(headless);
 
     // Lắng nghe tín hiệu dừng an toàn (Ctrl + C)
     process.on("SIGINT", async () => {
@@ -122,6 +124,7 @@ export class BatchUnlimitMailRunner {
         captchaMode: this._captchaMode,
         profile: this._profile,
         cloneFrom: this._cloneFrom,
+        headless: this._headless,
       });
       this._currentRunner = runnerInstance;
 
@@ -138,6 +141,7 @@ export class BatchUnlimitMailRunner {
             proxyMode: isInlineProxy ? "shard" : this._proxyMode,
             proxyGroup: this._proxyGroup,
             proxy: isInlineProxy ? this._proxyMode : undefined,
+            headless: this._headless,
           });
 
           isSuccess = true;
@@ -193,6 +197,7 @@ function parseArgs() {
   let profile = process.env.SHARD_PROFILE || null;
   let cloneFrom = process.env.SHARD_CLONE_FROM || null;
   let captchaMode = process.env.CAPTCHA_MODE || "audio";
+  let headless = process.env.HEADLESS === "1" || false;
 
   for (const arg of args) {
     if (arg.startsWith("--count=")) {
@@ -218,6 +223,10 @@ function parseArgs() {
       captchaMode = "slider";
     } else if (arg === "--audio") {
       captchaMode = "audio";
+    } else if (arg === "--headless" || arg === "-h") {
+      headless = true;
+    } else if (arg === "--no-headless" || arg === "--headful") {
+      headless = false;
     } else if (arg === "--direct" || arg === "-d") {
       proxyMode = "direct";
     } else if (arg === "--shard" || arg === "-s") {
@@ -232,12 +241,12 @@ function parseArgs() {
     }
   }
 
-  return { targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode };
+  return { targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode, headless };
 }
 
 async function main() {
-  const { targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode } = parseArgs();
-  const batch = new BatchUnlimitMailRunner(targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode);
+  const { targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode, headless } = parseArgs();
+  const batch = new BatchUnlimitMailRunner(targetCount, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode, headless);
   await batch.run();
 }
 

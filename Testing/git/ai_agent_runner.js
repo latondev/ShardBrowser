@@ -264,6 +264,7 @@ export class AiAgentRunner {
     this._proxyMode = customConfig.proxyMode || process.env.PROXY_MODE || "shard";
     this._proxyGroup = customConfig.proxyGroup || process.env.PROXY_GROUP || "all";
     this._captchaMode = customConfig.captchaMode || process.env.CAPTCHA_MODE || "audio";
+    this._headless = customConfig.headless ?? (process.env.HEADLESS === "1" || false);
     this._omocaptchaClient = customConfig.omocaptchaClient || new OMOCaptchaClient(customConfig.omocaptchaKey || process.env.OMOCAPTCHA_KEY);
     this._gmailClient = new GmailCreatorClient(customConfig.rapidApiKey);
     this._mailTm = new MailTmClient();
@@ -2289,7 +2290,8 @@ export class AiAgentRunner {
     }
 
     try {
-      console.log(`[ShardX] 🚀 Đang kết nối ShardX Launcher tại ${this._launcherApiUrl}...`);
+      const effectiveHeadless = options.headless ?? this._headless ?? false;
+      console.log(`[ShardX] 🚀 Đang kết nối ShardX Launcher tại ${this._launcherApiUrl} (Chế độ: ${effectiveHeadless ? 'HEADLESS / ẨN TRÌNH DUYỆT' : 'HIỂN THỊ CỬA SỔ'})...`);
 
       const targetProf = options.profile || options.profileName || options.profileId || this._targetProfile;
       const cloneTarget = options.cloneFrom || options.clone || (options.isClone ? targetProf : null);
@@ -2313,7 +2315,7 @@ export class AiAgentRunner {
                 this._isCreatedProfile = true; // Sẽ tự động dọn dẹp bản clone sau khi đăng ký xong
                 console.log(`✨ [Clone Success] Đã tạo Profile Clone mới ID: ${this._profileId} ('${clonedMeta.name}'). Đang khởi chạy...`);
 
-                const { data: startRes } = await axios.post(`${this._launcherApiUrl}/profiles/${this._profileId}/start`, { headless: false }, { headers: this._headers });
+                const { data: startRes } = await axios.post(`${this._launcherApiUrl}/profiles/${this._profileId}/start`, { headless: effectiveHeadless }, { headers: this._headers });
                 const wsUrl = startRes.cdp?.web_socket_debugger_url;
 
                 if (wsUrl) {
@@ -2348,7 +2350,7 @@ export class AiAgentRunner {
               this._isCreatedProfile = false; // Đánh dấu là profile người dùng, KHÔNG XÓA khi kết thúc
               console.log(`✨ [Existing Profile] Tìm thấy Profile có sẵn: '${matched.name}' (ID: ${matched.id}). Đang khởi chạy...`);
 
-              const { data: startRes } = await axios.post(`${this._launcherApiUrl}/profiles/${this._profileId}/start`, { headless: false }, { headers: this._headers });
+              const { data: startRes } = await axios.post(`${this._launcherApiUrl}/profiles/${this._profileId}/start`, { headless: effectiveHeadless }, { headers: this._headers });
               const wsUrl = startRes.cdp?.web_socket_debugger_url;
 
               if (wsUrl) {
@@ -2571,8 +2573,8 @@ export class AiAgentRunner {
       console.log(`✨ [Profile Created] Tạo thành công Profile nhóm [GitHub-Auto] ID: ${this._profileId} ('${profilePayload.name}')`);
 
       // BƯỚC 4: KHỞI CHẠY PROFILE VÀ KẾT NỐI CDP
-      console.log(`🚀 [Browser Launch] Khởi chạy Profile '${profilePayload.name}' qua ShardX CDP...`);
-      const { data: startRes } = await axios.post(`${this._launcherApiUrl}/profiles/${this._profileId}/start`, { headless: false }, { headers: this._headers });
+      console.log(`🚀 [Browser Launch] Khởi chạy Profile '${profilePayload.name}' qua ShardX CDP (Headless: ${effectiveHeadless})...`);
+      const { data: startRes } = await axios.post(`${this._launcherApiUrl}/profiles/${this._profileId}/start`, { headless: effectiveHeadless }, { headers: this._headers });
       const wsUrl = startRes.cdp?.web_socket_debugger_url;
 
       if (!wsUrl) {
@@ -3443,6 +3445,7 @@ async function main() {
   let proxyGroup = "vn";
   let emailService = process.env.EMAIL_SERVICE || "gmail";
   let captchaMode = process.env.CAPTCHA_MODE || "slider";
+  let headless = false;
 
   for (const arg of args) {
     if (arg === "--rotate" || arg === "-r") {
@@ -3467,15 +3470,18 @@ async function main() {
       captchaMode = "slider";
     } else if (arg === "--audio") {
       captchaMode = "audio";
+    } else if (arg === "--headless" || arg === "-h") {
+      headless = true;
     }
   }
 
-  const runner = new AiAgentRunner({ proxyMode, proxyGroup, emailService, captchaMode });
+  const runner = new AiAgentRunner({ proxyMode, proxyGroup, emailService, captchaMode, headless });
   try {
     await runner.runFullE2EWorkflow({
       saveSecrets: true,
       proxyMode,
-      proxyGroup
+      proxyGroup,
+      headless
     });
   } catch (error) {
     console.error(`\n❌ [Lỗi Hệ Thống]: ${error.message}`);

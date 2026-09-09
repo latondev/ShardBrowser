@@ -61,8 +61,9 @@ export class BatchHotmailRunner {
   _failedCount = 0;
   _currentRunner = null;
   _isStopping = false;
+  _headless = false;
 
-  constructor(filePath = "", cooldownSeconds = 15, proxyMode = "shard", proxyGroup = "all", profile = null, cloneFrom = null, captchaMode = "slider") {
+  constructor(filePath = "", cooldownSeconds = 15, proxyMode = "shard", proxyGroup = "all", profile = null, cloneFrom = null, captchaMode = "slider", headless = false) {
     this._filePath = resolveAccountFile(filePath);
     this._cooldownSeconds = Number(cooldownSeconds) || 15;
     this._proxyMode = proxyMode || "shard";
@@ -70,6 +71,7 @@ export class BatchHotmailRunner {
     this._profile = profile || null;
     this._cloneFrom = cloneFrom || null;
     this._captchaMode = captchaMode || "slider";
+    this._headless = Boolean(headless);
 
     // Lắng nghe tín hiệu dừng an toàn (Ctrl + C)
     process.on("SIGINT", async () => {
@@ -173,6 +175,7 @@ export class BatchHotmailRunner {
       let isSuccess = false;
       let attempt = 0;
       const maxAttempts = 3;
+      const isInlineProxy = this._proxyMode.includes(":") || this._proxyMode.includes("//");
 
       while (attempt < maxAttempts && !isSuccess && !this._isStopping) {
         attempt++;
@@ -184,6 +187,7 @@ export class BatchHotmailRunner {
           captchaMode: this._captchaMode,
           profile: this._profile,
           cloneFrom: this._cloneFrom,
+          headless: this._headless,
         });
         this._currentRunner = runner;
 
@@ -195,6 +199,7 @@ export class BatchHotmailRunner {
             proxy: isInlineProxy ? this._proxyMode : undefined,
             profile: this._profile,
             cloneFrom: this._cloneFrom,
+            headless: this._headless,
           });
 
           isSuccess = true;
@@ -248,6 +253,7 @@ function parseCommandLineArgs() {
   let profile = null;
   let cloneFrom = null;
   let captchaMode = process.env.CAPTCHA_MODE || "audio";
+  let headless = process.env.HEADLESS === "1" || false;
 
   for (const arg of args) {
     if (arg.startsWith("--file=")) {
@@ -264,6 +270,10 @@ function parseCommandLineArgs() {
       captchaMode = "slider";
     } else if (arg === "--audio") {
       captchaMode = "audio";
+    } else if (arg === "--headless" || arg === "-h") {
+      headless = true;
+    } else if (arg === "--no-headless" || arg === "--headful") {
+      headless = false;
     } else if (arg.startsWith("--proxy=")) {
       const pVal = arg.replace(/^--proxy=/, "").trim();
       if (["direct", "shard", "rotate"].includes(pVal.toLowerCase())) {
@@ -288,13 +298,13 @@ function parseCommandLineArgs() {
     }
   }
 
-  return { filePath, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode };
+  return { filePath, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode, headless };
 }
 
 // CLI Entrypoint
 async function main() {
-  const { filePath, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode } = parseCommandLineArgs();
-  const batch = new BatchHotmailRunner(filePath, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode);
+  const { filePath, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode, headless } = parseCommandLineArgs();
+  const batch = new BatchHotmailRunner(filePath, cooldownSec, proxyMode, proxyGroup, profile, cloneFrom, captchaMode, headless);
   await batch.run();
 }
 
