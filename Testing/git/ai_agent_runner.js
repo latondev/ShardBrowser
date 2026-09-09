@@ -1788,7 +1788,41 @@ export class AiAgentRunner {
     cleanKey = cleanKey.replace(/[\s-]/g, "").toUpperCase();
     this._accountState.twoFactorSecret = cleanKey;
     console.log(`🔐 [2FA Setup] Đã lấy Setup Key từ GitHub: ${cleanKey}`);
-    await this._safeSleep(1500);
+
+    // ĐÓNG MODAL / POPUP SETUP KEY NGAY SAU KHI LẤY KEY ĐỂ KHÔNG BỊ CHE Ô INPUT OTP (chuẩn github_2fa_puppeteer.mjs)
+    console.log("-> Đang đóng Modal / Dialog Setup Key để lộ ô nhập mã OTP...");
+    await page.evaluate(() => {
+      const closeSelectors = [
+        "dialog button[aria-label='Close']",
+        "dialog .Button--close",
+        "dialog [data-action*='close']",
+        "dialog .close-button",
+        ".Overlay-closeButton",
+        "button[aria-label='Close']",
+        "[data-testid='close-button']",
+        "button[data-action='click:two-factor-setup-verification#closeModal']",
+        "details[open] summary",
+        "dialog button"
+      ];
+      for (const sel of closeSelectors) {
+        const btns = document.querySelectorAll(sel);
+        for (const btn of btns) {
+          const txt = (btn.innerText || btn.textContent || btn.getAttribute("aria-label") || "").trim().toLowerCase();
+          if (txt === "close" || txt === "cancel" || txt === "đóng" || btn.getAttribute("aria-label") === "Close") {
+            btn.click();
+            break;
+          }
+        }
+      }
+      const openDialogs = document.querySelectorAll("dialog[open]");
+      openDialogs.forEach((d) => { try { d.close(); } catch {} });
+      const backdrops = document.querySelectorAll(".Overlay-backdrop, [data-component='backdrop']");
+      backdrops.forEach((b) => { try { b.remove(); } catch {} });
+    }).catch(() => {});
+
+    await page.keyboard.press("Escape");
+    await this._safeSleep(1000);
+
     return cleanKey;
   }
 
@@ -2061,45 +2095,82 @@ export class AiAgentRunner {
 
     // 7. Điền mã TOTP vào form verify của GitHub
     console.log(`-> Điền mã xác thực TOTP: [ ${code} ]`);
-    const otpSelector = 'input[placeholder="XXXXXX"], input[name="otp"], input[autocomplete="one-time-code"], input[id*="otp"], form[action*="setup/verify"] input[type="text"]';
-    
-    await page.waitForSelector(otpSelector, { visible: true, timeout: 20000 });
-    const otpEl = await page.$(otpSelector);
-    if (!otpEl) throw new Error("Không tìm thấy ô nhập mã xác minh TOTP.");
+    const otpSelectors = [
+      'input[placeholder="XXXXXX"]',
+      'two-factor-setup-verification input[name="otp"]',
+      'input[name="otp"]',
+      'input[autocomplete="one-time-code"]',
+      'form[action*="setup/verify"] input[type="text"]',
+      'form[action*="setup"] input[name="otp"]',
+      'input[data-testid="otp-input"]',
+      '#app_totp'
+    ];
+
+    let otpEl = null;
+    for (const sel of otpSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) {
+          const isVis = await el.evaluate((node) => {
+            const rect = node.getBoundingClientRect();
+            return !node.hidden && rect.width > 0 && rect.height > 0;
+          });
+          if (isVis) {
+            otpEl = el;
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    if (!otpEl) {
+      await page.keyboard.press("Escape");
+      await this._safeSleep(500);
+      try {
+        otpEl = await page.waitForSelector('two-factor-setup-verification input, input[placeholder="XXXXXX"], input[name="otp"]', { visible: true, timeout: 10000 });
+      } catch {}
+    }
+
+    if (!otpEl) throw new Error("Không tìm thấy ô nhập mã xác minh TOTP trên giao diện GitHub.");
 
     // Cuộn tới ô input và focus
-    await page.evaluate((selector) => {
-      const el = document.querySelector(selector);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        el.focus();
-      }
-    }, otpSelector).catch(() => {});
-    await this._safeSleep(500);
+    await otpEl.evaluate((el) => {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.focus();
+    });
+    await this._safeSleep(300);
 
     // Gõ mã OTP bằng bàn phím người thật
     await otpEl.click({ clickCount: 3 });
     await page.keyboard.press("Backspace");
-    await this._safeSleep(150);
+    await this._safeSleep(100);
 
     for (const char of code) {
-      await page.keyboard.type(char, { delay: this._randomDelay(50, 90) });
+      await page.keyboard.type(char, { delay: this._randomDelay(40, 70) });
     }
-    await this._safeSleep(1200);
+
+    // Đồng bộ giá trị vào input và dispatch events để GitHub form nhận diện (chuẩn github_2fa_puppeteer.mjs)
+    await otpEl.evaluate((el, val) => {
+      el.value = val;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new Event("blur", { bubbles: true }));
+    }, code);
+    await this._safeSleep(800);
 
     // Bấm nút Continue màu xanh hoặc submit form
     console.log("-> Bấm nút 'Continue' để xác nhận mã TOTP...");
     let submitted = await page.evaluate(() => {
-      // Tìm nút Continue màu xanh
       const btns = Array.from(document.querySelectorAll("button, input[type='submit']"));
       for (const b of btns) {
         const txt = (b.innerText || b.textContent || b.value || "").trim().toLowerCase();
-        if (txt === "continue" || txt === "verify" || txt.includes("save")) {
+        if (txt === "continue" || txt === "verify" || txt.includes("save and continue") || txt.includes("save")) {
+          b.scrollIntoView({ behavior: "smooth", block: "center" });
           b.click();
           return true;
         }
       }
-      const form = document.querySelector('form[action*="setup/verify"]');
+      const form = document.querySelector('form[action*="setup/verify"], two-factor-setup-verification form');
       if (form) {
         form.requestSubmit();
         return true;

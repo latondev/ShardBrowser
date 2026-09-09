@@ -84,6 +84,13 @@ export class TotpClient {
   async getCodeWithFallback(secretKey) {
     const cleanKey = String(secretKey).replace(/[\s-]/g, "").toUpperCase();
 
+    // Nếu thời gian chu kỳ còn lại quá ít (< 4s), chờ sang chu kỳ mới để mã không bị hết hạn lúc submit
+    const remaining = this.getRemainingSeconds(30);
+    if (remaining < 4) {
+      console.log(`⏳ [TOTP Window] Mã sắp hết hạn (${remaining}s), chờ sang chu kỳ mới...`);
+      await new Promise(r => setTimeout(r, (remaining + 1) * 1000));
+    }
+
     // 1. Ưu tiên hàng đầu: Lấy mã chuẩn tuyệt đối từ 2fa.live API (Tránh triệt để lỗi lệch giờ máy tính Windows)
     try {
       const res = await axios.get(`https://2fa.live/tok/${cleanKey}`, { timeout: 4000 });
