@@ -1147,6 +1147,29 @@ export class AiAgentRunner {
     const selectedMode = mode || this._captchaMode || "slider";
 
     try {
+      // 0. NẾU FORM ĐĂNG KÝ GITHUB (Create your free account) ĐANG MỞ SẴN -> BỎ QUA CAPTCHA NGAY!
+      const isFormReady = await page.evaluate(() => {
+        const header = document.querySelector("h1.signups-rebrand__container-h1, .signups-rebrand__container-content, h1");
+        const headerTxt = (header?.innerText || "").toLowerCase();
+        const hasEmail = !!document.querySelector("#email, input[name='user[email]'], input[autocomplete='email']");
+        const hasContainer = !!document.querySelector(".signups-rebrand__container-content");
+
+        // Kiểm tra xem có iframe Captcha DataDome thật sự đang che khuất màn hình không
+        const hasActiveCaptchaIframe = Array.from(document.querySelectorAll("iframe[src*='captcha-delivery'], iframe[src*='geo.captcha']")).some(f => {
+          const r = f.getBoundingClientRect();
+          return r.width > 150 && r.height > 150 && !f.hidden && window.getComputedStyle(f).display !== 'none';
+        });
+
+        if ((headerTxt.includes("create your free account") || hasContainer || hasEmail) && !hasActiveCaptchaIframe) {
+          return true; // Form đã mở và KHÔNG có Captcha che
+        }
+        return false;
+      }).catch(() => false);
+
+      if (isFormReady) {
+        return false;
+      }
+
       const getAllContexts = () => {
         const contexts = [];
         try {
@@ -1171,27 +1194,22 @@ export class AiAgentRunner {
                                     body.includes("err_connection_closed") ||
                                     body.includes("captcha-delivery.com didn't send any data");
 
-              // Chỉ coi là có Captcha khi iframe/element thực sự HIỂN THỊ (visible) và có kích thước > 0
+              // Chỉ coi là có Captcha khi iframe Captcha thật sự HIỂN THỊ (visible) và có kích thước > 100px
               const visibleCaptchaIframe = Array.from(document.querySelectorAll("iframe[src*='captcha-delivery'], iframe[src*='geo.captcha']")).some(el => {
                 const r = el.getBoundingClientRect();
-                return r.width > 50 && r.height > 50 && !el.hidden && window.getComputedStyle(el).display !== 'none';
+                return r.width > 100 && r.height > 100 && !el.hidden && window.getComputedStyle(el).display !== 'none';
               });
 
-              const visibleSliderBtn = Array.from(document.querySelectorAll("#captcha__slider__btn, .slider-button, .slider-btn, #slider, .geetest_slider_button")).some(el => {
+              // Chỉ tìm slider button bên trong iframe Captcha hoặc khi không có form đăng ký
+              const isMainForm = !!document.querySelector(".signups-rebrand__container-content, h1.signups-rebrand__container-h1, #email");
+              const visibleSliderBtn = !isMainForm && Array.from(document.querySelectorAll("#captcha__slider__btn, #captcha__audio__button")).some(el => {
                 const r = el.getBoundingClientRect();
                 return r.width > 10 && r.height > 10 && !el.hidden && window.getComputedStyle(el).display !== 'none';
               });
 
-              const visibleAudioBtn = Array.from(document.querySelectorAll("#captcha__audio__button, #captcha__audio")).some(el => {
-                const r = el.getBoundingClientRect();
-                return r.width > 10 && r.height > 10 && !el.hidden && window.getComputedStyle(el).display !== 'none';
-              });
+              const hasExplicitText = !isMainForm && (body.includes("slide right to secure your access") || body.includes("why is this step needed"));
 
-              const hasExplicitText = body.includes("slide right to secure your access") ||
-                                      body.includes("why is this step needed") ||
-                                      (body.includes("verification required") && !document.querySelector("#email"));
-
-              const detected = visibleCaptchaIframe || visibleSliderBtn || visibleAudioBtn || hasExplicitText;
+              const detected = visibleCaptchaIframe || visibleSliderBtn || hasExplicitText;
               return { detected, isNetworkDead };
             });
 
@@ -2928,28 +2946,24 @@ export class AiAgentRunner {
                                     lower.includes("tạm thời hạn chế truy cập") ||
                                     lower.includes("unable to verify your captcha response");
 
-              // 2. Kiểm tra ô input Email / Password có hiển thị trên màn hình không
+              // 2. NHẬN DIỆN FORM ĐĂNG KÝ GITHUB (Create your free account)
+              const hasFormHeader = lower.includes("create your free account") ||
+                                    !!document.querySelector(".signups-rebrand__container-content, h1.signups-rebrand__container-h1, h1");
               const emailEl = document.querySelector("#email, input[name='user[email]'], input[autocomplete='email']");
               const passEl = document.querySelector("#password, input[name='user[password]']");
-              const hasEmailInput = !!(emailEl && (emailEl.offsetWidth > 0 || emailEl.getBoundingClientRect().width > 0)) ||
+              const hasEmailInput = hasFormHeader ||
+                                    !!(emailEl && (emailEl.offsetWidth > 0 || emailEl.getBoundingClientRect().width > 0)) ||
                                     !!(passEl && (passEl.offsetWidth > 0 || passEl.getBoundingClientRect().width > 0));
 
-              // 3. Kiểm tra DataDome Geo Captcha (Chỉ khi có iframe hoặc nút Slider THỰC SỰ HIỂN THỊ TRÊN MÀN HÌNH)
+              // 3. Kiểm tra DataDome Geo Captcha (Chỉ khi có iframe Captcha thật sự ĐANG HIỂN THỊ CHE MÀN HÌNH)
               const visibleCaptchaIframe = Array.from(document.querySelectorAll("iframe[src*='captcha-delivery'], iframe[src*='geo.captcha'], iframe[src*='arkoselabs']")).some(el => {
                 const r = el.getBoundingClientRect();
-                return r.width > 50 && r.height > 50 && !el.hidden && window.getComputedStyle(el).display !== 'none';
-              });
-
-              const visibleSlider = Array.from(document.querySelectorAll("#captcha__slider__btn, #captcha__audio__button, #captcha__slider, .slider-button, .slider-btn, .geetest_slider_button")).some(el => {
-                const r = el.getBoundingClientRect();
-                return r.width > 10 && r.height > 10 && !el.hidden && window.getComputedStyle(el).display !== 'none';
+                return r.width > 120 && r.height > 120 && !el.hidden && window.getComputedStyle(el).display !== 'none';
               });
 
               const isCaptcha = !isRateLimited && (
                 visibleCaptchaIframe ||
-                visibleSlider ||
-                lower.includes("slide right to secure your access") ||
-                (!hasEmailInput && (lower.includes("why is this step needed") || lower.includes("verification required") || lower.includes("geo.captcha-delivery.com")))
+                (!hasEmailInput && (lower.includes("slide right to secure your access") || lower.includes("why is this step needed") || lower.includes("geo.captcha-delivery.com")))
               );
 
               // Kiểm tra lỗi Proxy chặn CDN GitHub (Please enable JS and disable any ad blocker)
