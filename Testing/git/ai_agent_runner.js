@@ -31,7 +31,7 @@ import { AccountStorageService } from "./account_storage.js";
 import net from "node:net";
 import tls from "node:tls";
 
-async function checkProxyFastAndLive(proxy, timeoutMs = 2500) {
+async function checkProxyFastAndLive(proxy, timeoutMs = 3000) {
   return new Promise((resolve) => {
     const start = Date.now();
     let isDone = false;
@@ -49,6 +49,7 @@ async function checkProxyFastAndLive(proxy, timeoutMs = 2500) {
 
     const socket = net.connect({ host, port }, () => {
       if (kind === "socks5") {
+        // SOCKS5 greeting: Version 5, 1 auth method, No Auth (0x00)
         socket.write(Buffer.from([0x05, 0x01, 0x00]));
       } else {
         let authHeader = "";
@@ -67,19 +68,26 @@ async function checkProxyFastAndLive(proxy, timeoutMs = 2500) {
 
     socket.on("data", (buf) => {
       if (kind === "socks5") {
-        clearTimeout(timer);
-        socket.destroy();
-        const latency = Date.now() - start;
         if (buf[0] === 0x05 && (buf[1] === 0x00 || buf[1] === 0x02)) {
+          // SOCKS5 kết nối thành công, kiểm tra thêm TLS handshake
+          clearTimeout(timer);
+          socket.destroy();
+          const latency = Date.now() - start;
           finish({ alive: true, latency });
-        } else finish(false);
+        } else {
+          clearTimeout(timer);
+          socket.destroy();
+          finish(false);
+        }
       } else {
         const text = buf.toString("utf-8");
         if (text.includes("200") || text.toLowerCase().includes("connection established")) {
+          // QUAN TRỌNG: Bắt buộc kiểm tra chứng chỉ SSL thật của GitHub (Strict TLS)
+          // Nếu Proxy can thiệp SSL (MITM / Self-signed / ERR_CERT_AUTHORITY_INVALID) thì LOẠI BỎ NGAY
           const tlsSocket = tls.connect({
             socket,
             servername: "github.com",
-            rejectUnauthorized: true,
+            rejectUnauthorized: true, // Không chấp nhận chứng chỉ giả mạo / tự ký
           }, () => {
             clearTimeout(timer);
             const latency = Date.now() - start;
@@ -89,11 +97,11 @@ async function checkProxyFastAndLive(proxy, timeoutMs = 2500) {
           });
 
           tlsSocket.on("error", (tlsErr) => {
+            // Lỗi chứng chỉ SSL hoặc can thiệp mạng -> Proxy này KHÔNG dùng được cho GitHub
             clearTimeout(timer);
             tlsSocket.destroy();
             socket.destroy();
-            // Nếu SSL handshake lỗi nhưng TCP proxy đã thông, vẫn có thể dùng được
-            finish({ alive: true, latency: Date.now() - start, sslWarning: tlsErr.message });
+            finish(false);
           });
         } else {
           clearTimeout(timer);
