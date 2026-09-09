@@ -454,6 +454,80 @@ export class AiAgentRunner {
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
   }
 
+  // Ẩn danh CDP / Anti-Bot Stealth Evasions (Xoá triệt để dấu hiệu automation & đồng bộ Timezone/Locale)
+  async _injectStealthEvasions(page) {
+    if (!page || page.isClosed()) return;
+
+    try {
+      // 1. Áp dụng CDP Emulation Override (Timezone & Locale theo US / Proxy chuẩn)
+      try {
+        const client = await page.target().createCDPSession();
+        await client.send("Emulation.setTimezoneOverride", { timezoneId: "America/New_York" }).catch(() => {});
+        await client.send("Emulation.setLocaleOverride", { locale: "en-US" }).catch(() => {});
+      } catch {}
+
+      // 2. Tiêm script xóa bỏ hoàn toàn dấu vết Puppeteer / Webdriver / CDP vào trước khi DOM nạp
+      await page.evaluateOnNewDocument(() => {
+        // Xóa navigator.webdriver
+        try {
+          Object.defineProperty(navigator, "webdriver", {
+            get: () => undefined,
+            configurable: true
+          });
+          delete Object.getPrototypeOf(navigator).webdriver;
+        } catch {}
+
+        // Giả lập window.chrome runtime đầy đủ chuẩn Chrome Native
+        try {
+          window.chrome = {
+            app: { isInstalled: false, InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" }, RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" } },
+            runtime: {
+              OnInstalledReason: { CHROME_UPDATE: "chrome_update", INSTALL: "install", SHARED_MODULE_UPDATE: "shared_module_update", UPDATE: "update" },
+              OnRestartRequiredReason: { APP_UPDATE: "app_update", OS_UPDATE: "os_update", PERIODIC: "periodic" },
+              PlatformArch: { ARM: "arm", ARM64: "arm64", MIPS: "mips", MIPS64: "mips64", X86_32: "x86-32", X86_64: "x86-64" },
+              PlatformNaclArch: { ARM: "arm", MIPS: "mips", MIPS64: "mips64", X86_32: "x86-32", X86_64: "x86-64" },
+              PlatformOs: { ANDROID: "android", CROS: "cros", LINUX: "linux", MAC: "mac", OPENBSD: "openbsd", WIN: "win" },
+              RequestUpdateCheckStatus: { NO_UPDATE: "no_update", THROTTLED: "throttled", UPDATE_AVAILABLE: "update_available" }
+            },
+            loadTimes: function() {},
+            csi: function() {}
+          };
+        } catch {}
+
+        // Chuẩn hóa navigator.languages & navigator.plugins
+        try {
+          Object.defineProperty(navigator, "languages", {
+            get: () => ["en-US", "en"],
+            configurable: true
+          });
+        } catch {}
+
+        // Chuẩn hóa Permissions Query
+        try {
+          const originalQuery = window.navigator.permissions.query;
+          window.navigator.permissions.query = (parameters) => (
+            parameters.name === "notifications"
+              ? Promise.resolve({ state: Notification.permission === "denied" ? "denied" : "prompt" })
+              : originalQuery(parameters)
+          );
+        } catch {}
+
+        // Xóa sạch các biến quét CDP đặc trưng của DataDome / Cloudflare
+        try {
+          const removeCdc = () => {
+            for (const key of Object.keys(window)) {
+              if (key.match(/^cdc_/) || key.includes("puppeteer") || key.includes("__webdriver")) {
+                try { delete window[key]; } catch {}
+              }
+            }
+          };
+          removeCdc();
+          document.addEventListener("DOMContentLoaded", removeCdc);
+        } catch {}
+      }).catch(() => {});
+    } catch {}
+  }
+
   // Di chuột tự nhiên theo đường cong Bézier (Human-like Curve Trajectory)
   async _humanMouseMove(page, targetX, targetY) {
     if (!page || page.isClosed() || !targetX || !targetY) return;
@@ -2652,26 +2726,31 @@ export class AiAgentRunner {
         try {
           console.log(`⏳ [Tải GitHub] Lần thử ${attempt}/${maxRetries} (Khởi động từ Trang chủ)...`);
 
+          // Nạp Stealth Evasions chống phát hiện Automation/CDP
+          await this._injectStealthEvasions(this._githubPage);
+
           // 1. Vào trang chủ github.com trước để nạp Cookie phiên & Trust Score
           await this._githubPage.goto("https://github.com/", {
             waitUntil: "domcontentloaded",
             timeout: 45000,
           }).catch(() => {});
 
-          await this._actionDelay(1500, 2500);
+          // Dừng lại 3s - 5s như người thật đang đọc lướt trang chủ
+          console.log("👀 [Human Browsing] Đang lướt trang chủ GitHub tự nhiên (3s - 5s)...");
+          await this._actionDelay(3000, 5000);
 
           // Mô phỏng người dùng lướt nhẹ trang chủ trước khi bấm đăng ký
           try {
-            await this._humanMouseMove(this._githubPage, 350 + Math.random() * 250, 220 + Math.random() * 180);
-            await this._safeSleep(500);
+            await this._humanMouseMove(this._githubPage, 450 + Math.random() * 200, 250 + Math.random() * 150);
+            await this._safeSleep(600);
             await this._smartScroll(this._githubPage, "down");
-            await this._safeSleep(600);
+            await this._safeSleep(800 + Math.floor(Math.random() * 400));
             await this._smartScroll(this._githubPage, "up");
-            await this._safeSleep(600);
+            await this._safeSleep(800);
           } catch {}
 
           // 2. Điều hướng vào trang Đăng ký (Sign up)
-          console.log("-> Bắt đầu điều hướng vào Form Đăng ký từ Trang chủ...");
+          console.log("-> Bắt đầu di chuyển chuột vào nút 'Sign up' trên Header...");
 
           try {
             if (!this._githubPage.url().includes("/signup")) {
@@ -2685,7 +2764,7 @@ export class AiAgentRunner {
                   try {
                     console.log("-> Mở menu điều hướng Header...");
                     await hamburgerBtn.click({ delay: 60 });
-                    await this._safeSleep(600);
+                    await this._safeSleep(800);
                     headerSignUpBtn = await this._githubPage.$("a[href*='/signup']");
                   } catch {}
                 }
@@ -2694,14 +2773,18 @@ export class AiAgentRunner {
               if (headerSignUpBtn) {
                 const box = await headerSignUpBtn.boundingBox().catch(() => null);
                 if (box && box.width > 0 && box.height > 0) {
-                  console.log("-> Di chuyển chuột và Click tự nhiên vào nút 'Sign up' trên Header...");
-                  await this._humanMouseMove(this._githubPage, box.x + box.width / 2, box.y + box.height / 2);
-                  await this._safeSleep(300 + Math.floor(Math.random() * 200));
-                  await Promise.all([
-                    this._githubPage.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}),
-                    headerSignUpBtn.click({ delay: 70 })
-                  ]);
-                  console.log("✅ [Header Click] Đã click nút 'Sign up'!");
+                  const targetX = box.x + box.width / 2;
+                  const targetY = box.y + box.height / 2;
+                  console.log(`-> Rê chuột tự nhiên vào tâm nút 'Sign up' (${Math.round(targetX)}, ${Math.round(targetY)})...`);
+                  await this._humanMouseMove(this._githubPage, targetX, targetY);
+                  await this._safeSleep(500 + Math.floor(Math.random() * 300)); // Hover tự nhiên
+
+                  // Nhấn chuột thật bằng CDP Mouse Event (isTrusted: true)
+                  await this._githubPage.mouse.move(targetX, targetY);
+                  await this._githubPage.mouse.down({ button: "left" });
+                  await this._safeSleep(80 + Math.floor(Math.random() * 50));
+                  await this._githubPage.mouse.up({ button: "left" });
+                  console.log("✅ [Header Click] Đã nhấn nút 'Sign up' bằng chuột thật!");
                 }
               }
             }
