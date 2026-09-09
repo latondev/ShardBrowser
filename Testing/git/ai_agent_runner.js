@@ -2366,10 +2366,21 @@ export class AiAgentRunner {
         }
       } catch {}
 
-      // Đồng bộ hóa triệt để: Timezone, Geo, Language tự động theo IP Proxy; Tắt noise để giữ Hardware Native 100%
-      baseFp.timezone = "auto";
-      baseFp.geolocation = { mode: "auto" };
-      baseFp.webrtc = "block";
+      // Đồng bộ hóa triệt để: Timezone, Geo, Language khớp 100% với US / Proxy; WebRTC chuẩn auto (không block làm lộ bot)
+      const isVnProxy = (chosenProxy?.country || "").toLowerCase().includes("vn") || (chosenProxy?.folder || "").toLowerCase() === "vn";
+      baseFp.timezone = isVnProxy ? "Asia/Ho_Chi_Minh" : "America/New_York";
+      baseFp.navigator = {
+        ...(baseFp.navigator || {}),
+        language: isVnProxy ? "vi-VN" : "en-US",
+        languages: isVnProxy ? ["vi-VN", "vi", "en-US", "en"] : ["en-US", "en"]
+      };
+      baseFp.geolocation = {
+        mode: "prompt",
+        latitude: isVnProxy ? 21.0285 : 40.7128,
+        longitude: isVnProxy ? 105.8542 : -74.0060,
+        accuracy: 15
+      };
+      baseFp.webrtc = "auto";
       baseFp.noise = {
         audio: { enabled: false },
         canvas: { enabled: false },
@@ -2404,7 +2415,7 @@ export class AiAgentRunner {
         notes: `Tách biệt hoàn toàn | Proxy: ${formattedProxy || 'Direct'} | Ping: ${chosenProxy?._verifiedLatency ? `${chosenProxy._verifiedLatency}ms` : '<1.5s'} | Time: ${new Date().toLocaleTimeString()}`,
         proxy: formattedProxy,
         proxy_id: chosenProxy?.id && !String(chosenProxy.id).startsWith("file_") ? chosenProxy.id : null,
-        webrtc: "block",
+        webrtc: "auto",
         fingerprint: baseFp,
         noise: {
           audio: { enabled: false },
