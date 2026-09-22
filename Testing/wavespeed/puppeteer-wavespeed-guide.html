@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Test WaveSpeed OAuth với Puppeteer</title>
+  <style>
+    :root{--bg:#111318;--panel:#1a1e27;--muted:#aab3c2;--text:#f5f7fb;--line:#303847;--accent:#83e0b4;--warn:#ffd083;--bad:#ff9d9d}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#27314b 0,#111318 42%);color:var(--text);font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif}main{max-width:980px;margin:0 auto;padding:56px 22px 80px}h1{font-size:clamp(2rem,5vw,4rem);line-height:1.05;max-width:760px;margin:0 0 18px}h2{margin:38px 0 10px;font-size:1.35rem}h3{margin:24px 0 8px;font-size:1.05rem}p{color:var(--muted);max-width:820px}code{font:0.92em ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}pre{overflow:auto;background:#0b0d11;border:1px solid var(--line);border-radius:12px;padding:15px;color:#e6edf6}pre code{color:#e6edf6}section,.callout{background:color-mix(in srgb,var(--panel) 88%,transparent);border:1px solid var(--line);border-radius:16px;padding:20px;margin-top:18px}.callout{border-color:#65522b;background:#282319}.danger{border-color:#6b3333;background:#281c20}.ok{border-color:#2d664d;background:#17291f}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--muted);font-size:.82rem;margin:4px 5px 0 0}li{margin:7px 0;color:var(--muted)}strong{color:var(--text)}a{color:var(--accent)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}.card{background:#141821;border:1px solid var(--line);border-radius:12px;padding:14px}.status{font:700 .82rem ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}footer{margin-top:40px;color:var(--muted);font-size:.9rem}
+  </style>
+</head>
+<body>
+<main>
+  <div class="pill">Puppeteer + GitHub OAuth</div><div class="pill">WaveSpeed</div><div class="pill">Không lưu mật khẩu</div>
+  <h1>Test đăng nhập WaveSpeed local, có kiểm tra tài khoản GitHub bị hạn chế</h1>
+  <p>Thư mục tải xuống kèm theo trang này có script <code>wavespeed-github-oauth-check.mjs</code>. Script dùng một profile Chrome riêng, để bạn đăng nhập và nhập 2FA thủ công ở lần đầu. Nó không cố vượt qua hạn chế của GitHub.</p>
+
+  <div class="callout"><strong>Quan trọng:</strong> API key có toàn quyền inference và billing. Không đưa password, mã TOTP hoặc API key vào mã nguồn, Git, ảnh chụp màn hình hay tin nhắn công khai.</div>
+
+  <h2>1. Chuẩn bị local</h2>
+  <ol>
+    <li>Cài <strong>Node.js 20.6+</strong> trên máy của bạn để dùng được <code>--env-file</code>.</li>
+    <li>Tạo thư mục mới, ví dụ <code>wavespeed-puppeteer-test</code>.</li>
+    <li>Đặt hai file tải xuống vào cùng thư mục: <code>wavespeed-github-oauth-check.mjs</code> và <code>.env.example</code>.</li>
+    <li>Đổi tên <code>.env.example</code> thành <code>.env</code>. File này chỉ chứa cấu hình local, không commit lên Git.</li>
+  </ol>
+  <pre><code>npm init -y
+npm install puppeteer
+node --version</code></pre>
+
+  <h2>2. Chạy test detector trước</h2>
+  <p>Test này không mở trình duyệt và không cần tài khoản. Nó xác nhận script nhận diện đúng thông báo GitHub: <em>“This account is flagged, and therefore cannot authorize a third party application.”</em></p>
+  <pre><code>node wavespeed-github-oauth-check.mjs --test-flagged-detector</code></pre>
+  <p>Kết quả mong đợi là hai dòng <code>pass: true</code>: một case bị đánh dấu và một case OAuth bình thường.</p>
+
+  <h2>3. Chạy luồng OAuth bình thường</h2>
+  <p>Chạy lần đầu không tạo API key. Chrome sẽ mở ra. Nếu GitHub yêu cầu email, password hoặc 2FA, hãy nhập thủ công trong cửa sổ đó.</p>
+  <pre><code>node --env-file=.env wavespeed-github-oauth-check.mjs</code></pre>
+  <ol>
+    <li>WaveSpeed mở trang đăng nhập.</li>
+    <li>Script chọn <strong>Sign in with GitHub</strong>.</li>
+    <li>Bạn hoàn tất đăng nhập và 2FA trong trình duyệt.</li>
+    <li>Nếu GitHub hiện <strong>Authorize WaveSpeedAI</strong>, script bấm ủy quyền.</li>
+    <li>Script xác nhận đã tới dashboard WaveSpeed.</li>
+  </ol>
+  <div class="ok"><span class="status">WAVESPEED_LOGIN_OK</span><br>Đây là kết quả thành công. Profile được giữ ở <code>.puppeteer-profile</code> để các lần sau không phải đăng nhập lại.</div>
+
+  <h2>4. Kiểm tra case tài khoản bị GitHub hạn chế</h2>
+  <p>Không thể giả lập quyền hạn GitHub bằng cách bấm thêm nút hoặc đổi URL. Hãy dùng một tài khoản test đã bị hạn chế, hoặc chỉ chạy detector test ở bước 2.</p>
+  <ol>
+    <li>Chạy script như bước 3 với profile đang đăng nhập tài khoản test bị hạn chế.</li>
+    <li>Khi GitHub hiển thị thông báo hạn chế, script dừng ngay.</li>
+    <li>Kết quả sẽ là <code>BLOCKED_ACCOUNT_FLAGGED</code>.</li>
+    <li>Ảnh bằng chứng được lưu tại <code>artifacts/github-account-flagged.png</code>.</li>
+  </ol>
+  <div class="danger"><span class="status" style="color:var(--bad)">BLOCKED_ACCOUNT_FLAGGED</span><br>Không retry liên tục, không tìm cách bypass OAuth. Chủ tài khoản cần dùng luồng hỗ trợ/kháng nghị của GitHub hoặc dùng tài khoản hợp lệ khác.</div>
+
+  <h2>5. Tạo key mới khi bạn thật sự cần</h2>
+  <p>Mặc định script <strong>không</strong> tạo key để tránh tạo nhiều key ngoài ý muốn. Chỉ chạy lệnh dưới đây một lần khi bạn đã kiểm tra OAuth thành công.</p>
+  <pre><code>node --env-file=.env wavespeed-github-oauth-check.mjs --create-key</code></pre>
+  <p>Key chỉ in ra terminal một lần. Lưu nó vào secret manager hoặc file local không commit. Đừng chạy lại cờ <code>--create-key</code> nếu chưa cần key khác.</p>
+
+  <h2>6. Các trạng thái script</h2>
+  <div class="grid">
+    <div class="card"><span class="status">OAUTH_CONSENT</span><p>GitHub đã tới trang xin quyền WaveSpeed. Script sẽ ủy quyền.</p></div>
+    <div class="card"><span class="status">WAVESPEED_CALLBACK</span><p>App đã được ủy quyền từ trước và GitHub chuyển thẳng về WaveSpeed.</p></div>
+    <div class="card"><span class="status">WAVESPEED_LOGIN_OK</span><p>Đã quay về dashboard WaveSpeed.</p></div>
+    <div class="card"><span class="status">BLOCKED_ACCOUNT_FLAGGED</span><p>GitHub không cho tài khoản ủy quyền ứng dụng bên thứ ba.</p></div>
+    <div class="card"><span class="status">TIMEOUT</span><p>Chưa hoàn tất đăng nhập hoặc 2FA trong thời gian chờ.</p></div>
+    <div class="card"><span class="status">API_KEY_CREATED</span><p>Đã tạo key khi chạy với <code>--create-key</code>.</p></div>
+  </div>
+
+  <h2>7. Lỗi thường gặp</h2>
+  <ul>
+    <li><strong>Browser không mở:</strong> chạy lại <code>npm install puppeteer</code> và kiểm tra Node.js.</li>
+    <li><strong>Hết thời gian:</strong> hoàn tất đăng nhập/2FA trong cửa sổ Chrome; không đóng cửa sổ trước khi có kết quả.</li>
+    <li><strong>Không thấy nút Authorize:</strong> kiểm tra xem GitHub có đang ở trang login hay đang hiện thông báo hạn chế.</li>
+    <li><strong>Key dùng không được:</strong> dashboard hiện số dư <code>$0</code>; cần nạp credit theo tài khoản trước khi gọi model.</li>
+    <li><strong>Muốn đổi tài khoản:</strong> đóng script rồi dùng profile riêng khác, không xóa nhầm profile Chrome cá nhân.</li>
+  </ul>
+
+  <footer>File script đi kèm không chứa thông tin đăng nhập. Dùng tài khoản test và tuân thủ điều khoản của GitHub, WaveSpeed.</footer>
+</main>
+</body>
+</html>
