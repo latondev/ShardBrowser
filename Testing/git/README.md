@@ -115,6 +115,6 @@ Sau khi hoàn tất đăng ký thành công mỗi tài khoản, thông tin bao g
 
 
 
-
+cd Testing/git
 node batch_unlimitmail_runner.js --shard --cooldown=120 --slider
 >>

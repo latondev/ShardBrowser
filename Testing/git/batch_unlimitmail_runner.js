@@ -104,6 +104,7 @@ export class BatchUnlimitMailRunner {
     console.log(`🚀 KHỞI ĐỘNG BATCH UNLIMITMAIL RUNNER: ${isInfinite ? "CHẾ ĐỘ VÔ HẠN (24/7)" : `MỤC TIÊU ${this._totalTarget} TÀI KHOẢN`}`);
     console.log(`📧 Dịch vụ Email: [UNLIMITMAIL] (Tự động sinh mail & lấy OTP)`);
     console.log(`🌐 Chế độ mạng  : [${this._proxyMode.toUpperCase()}] ${this._proxyMode === 'direct' ? '(IP Direct mạng nhà - Chú ý: Dễ bị GitHub Rate-Limit)' : (this._proxyMode === 'shard' ? `(Proxy nhóm [${this._proxyGroup.toUpperCase()}] trong Shard)` : '(Proxy xoay proxyxoay.shop)')}`);
+    if (this._cloneFrom) console.log(`🧬 Profile mẫu   : [CLONE TỪ '${this._cloneFrom}'] (Thừa hưởng Cookie & Cache duyệt web thật)`);
     console.log(`⏱️ Nghỉ giữa    : ${this._cooldownSeconds}s mỗi tài khoản`);
     console.log("==================================================================\n");
 
@@ -141,6 +142,7 @@ export class BatchUnlimitMailRunner {
             proxyMode: isInlineProxy ? "shard" : this._proxyMode,
             proxyGroup: this._proxyGroup,
             proxy: isInlineProxy ? this._proxyMode : undefined,
+            cloneFrom: this._cloneFrom,
             headless: this._headless,
           });
 

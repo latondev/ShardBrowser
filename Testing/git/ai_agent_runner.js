@@ -86,24 +86,79 @@ async function checkProxyFastAndLive(proxy, timeoutMs = 3000) {
         const text = buf.toString("utf-8");
         if (text.includes("200") || text.toLowerCase().includes("connection established")) {
           // QUAN TRỌNG: Bắt buộc kiểm tra chứng chỉ SSL thật của GitHub (Strict TLS)
-          // Nếu Proxy can thiệp SSL (MITM / Self-signed / ERR_CERT_AUTHORITY_INVALID) thì LOẠI BỎ NGAY
+          // và Pre-flight GET /signup để kiểm tra xem IP có bị cờ đen "Access is temporarily restricted" hay không
+          let rawResp = "";
+
           const tlsSocket = tls.connect({
             socket,
             servername: "github.com",
             rejectUnauthorized: true, // Không chấp nhận chứng chỉ giả mạo / tự ký
           }, () => {
-            clearTimeout(timer);
-            const latency = Date.now() - start;
-            tlsSocket.destroy();
-            socket.destroy();
-            finish({ alive: true, latency });
+            // PRE-FLIGHT CHECK: Gửi HTTP GET /signup
+            const httpReq =
+              "GET /signup HTTP/1.1\r\n" +
+              "Host: github.com\r\n" +
+              "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36\r\n" +
+              "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n" +
+              "Accept-Language: en-US,en;q=0.9\r\n" +
+              "Sec-Fetch-Dest: document\r\n" +
+              "Sec-Fetch-Mode: navigate\r\n" +
+              "Sec-Fetch-Site: none\r\n" +
+              "Connection: close\r\n\r\n";
+            try { tlsSocket.write(httpReq); } catch {}
           });
 
-          tlsSocket.on("error", (tlsErr) => {
-            // Lỗi chứng chỉ SSL hoặc can thiệp mạng -> Proxy này KHÔNG dùng được cho GitHub
+          tlsSocket.on("data", (chunk) => {
+            rawResp += chunk.toString("utf-8");
+            if (rawResp.includes("\r\n\r\n") || rawResp.length > 1200) {
+              clearTimeout(timer);
+              const latency = Date.now() - start;
+              const lower = rawResp.toLowerCase();
+
+              // Nhận diện trạng thái bị GitHub / DataDome chặn / rate-limit
+              const isBlocked =
+                lower.includes("access is temporarily restricted") ||
+                lower.includes("unusual activity from your device or network") ||
+                lower.includes("http/1.1 403") ||
+                lower.includes("http/1.1 429") ||
+                lower.includes("datadome");
+
+              try { tlsSocket.destroy(); } catch {}
+              try { socket.destroy(); } catch {}
+
+              if (isBlocked) {
+                finish({ alive: false, blocked: true, latency });
+              } else {
+                finish({ alive: true, latency });
+              }
+            }
+          });
+
+          tlsSocket.on("end", () => {
             clearTimeout(timer);
-            tlsSocket.destroy();
-            socket.destroy();
+            const latency = Date.now() - start;
+            const lower = rawResp.toLowerCase();
+            const isBlocked =
+              lower.includes("access is temporarily restricted") ||
+              lower.includes("unusual activity from your device or network") ||
+              lower.includes("http/1.1 403") ||
+              lower.includes("http/1.1 429") ||
+              lower.includes("datadome");
+            try { tlsSocket.destroy(); } catch {}
+            try { socket.destroy(); } catch {}
+            if (isBlocked) {
+              finish({ alive: false, blocked: true, latency });
+            } else if (rawResp.includes("HTTP/1.1 200") || rawResp.includes("HTTP/1.1 30")) {
+              finish({ alive: true, latency });
+            } else {
+              finish(false);
+            }
+          });
+
+          tlsSocket.on("error", () => {
+            clearTimeout(timer);
+            try { tlsSocket.destroy(); } catch {}
+            try { socket.destroy(); } catch {}
             finish(false);
           });
         } else {
@@ -230,6 +285,7 @@ export class AiAgentRunner {
   _browser = null;
   _ownsBrowser = false;
   _profileId = null;
+  _cloneFrom = null;
   _isCreatedProfile = false;
   _activeProxy = null;
   _proxyMode = "shard"; // "shard" | "rotate" | "direct"
@@ -286,6 +342,7 @@ export class AiAgentRunner {
     }
 
     this._targetProfile = customConfig.profile || customConfig.profileName || customConfig.profileId || process.env.SHARD_PROFILE || null;
+    this._cloneFrom = customConfig.cloneFrom || customConfig.clone || process.env.SHARD_CLONE_FROM || null;
 
     const sessionSuffix = Date.now().toString().slice(-4);
     this._accountState.username = `user${Math.random().toString(36).substring(2, 8)}${sessionSuffix}`;
@@ -400,11 +457,19 @@ export class AiAgentRunner {
     // Nếu chỉ có đúng 1 proxy, kiểm tra trực tiếp và dùng luôn
     if (pool.length === 1) {
       const single = pool[0];
-      console.log(`🌐 [Proxy Pool] Có 1 Proxy duy nhất [${single.host}:${single.port}]. Đang kiểm tra kết nối...`);
-      const res = await checkProxyFastAndLive(single, 3000);
-      single._verifiedLatency = (res && res.latency) ? res.latency : 0;
-      console.log(`   \x1b[32m[✓ PROXY ĐƯỢC CHỌN]\x1b[0m Gán Proxy [${single.host}:${single.port}] (ping: ${single._verifiedLatency}ms) vào Profile.`);
-      return single;
+      console.log(`🌐 [Proxy Pool] Có 1 Proxy duy nhất [${single.host}:${single.port}]. Đang kiểm tra kết nối & độ sạch GitHub...`);
+      const res = await checkProxyFastAndLive(single, 3500);
+      if (res && res.blocked) {
+        AiAgentRunner._blacklistedProxyKeys.add(`${single.host}:${single.port}`);
+        console.warn(`   \x1b[31m[✗ IP BỊ GITHUB CHẶN]\x1b[0m Proxy [${single.host}:${single.port}] bị dính 'temporarily restricted' hoặc '429/403' -> Loại bỏ!`);
+        return null;
+      }
+      if (res && res.alive) {
+        single._verifiedLatency = (res && res.latency) ? res.latency : 0;
+        console.log(`   \x1b[32m[✓ PROXY SẠCH & ĐƯỢC CHỌN]\x1b[0m Gán Proxy [${single.host}:${single.port}] (ping: ${single._verifiedLatency}ms) vào Profile.`);
+        return single;
+      }
+      return null;
     }
 
     console.log(`🌐 [Proxy Pool] Tìm thấy ${pool.length} proxy khả dụng (Đã loại ${candidateList.length - pool.length} proxy rate-limit). Bắt đầu xáo trộn ngẫu nhiên và kiểm tra độ trễ...`);
@@ -421,23 +486,31 @@ export class AiAgentRunner {
 
       const batchResults = await Promise.all(
         batch.map(async (candidate) => {
-          const res = await checkProxyFastAndLive(candidate, 3000);
+          const res = await checkProxyFastAndLive(candidate, 3500);
           return { candidate, res };
         })
       );
 
-      // 1. Ưu tiên chọn proxy sống và có ping <= 2000ms
-      const passed = batchResults.find(r => r.res && r.res.alive && r.res.latency <= 2000);
+      // Lọc bỏ ngay các IP bị cờ đỏ DataDome / GitHub WAF
+      for (const item of batchResults) {
+        if (item.res && item.res.blocked) {
+          AiAgentRunner._blacklistedProxyKeys.add(`${item.candidate.host}:${item.candidate.port}`);
+          console.log(`   \x1b[31m[✗ IP BỊ GITHUB CHẶN]\x1b[0m Đã loại trừ proxy [${item.candidate.host}:${item.candidate.port}] (dính 'temporarily restricted'/403/429)`);
+        }
+      }
+
+      // 1. Ưu tiên chọn proxy sống, không bị block và có ping <= 2000ms
+      const passed = batchResults.find(r => r.res && r.res.alive && !r.res.blocked && r.res.latency <= 2000);
       if (passed) {
         const { candidate, res } = passed;
         candidate._verifiedLatency = res.latency;
-        console.log(`   \x1b[32m[✓ PROXY LIVE & NHANH]\x1b[0m Đã chọn [${candidate.host}:${candidate.port}] (ping: ${res.latency}ms)`);
+        console.log(`   \x1b[32m[✓ PROXY SẠCH LIVE & NHANH]\x1b[0m Đã chọn [${candidate.host}:${candidate.port}] (ping: ${res.latency}ms)`);
         return candidate;
       }
 
       // 2. Lưu lại proxy sống để làm phương án dự phòng tốt nhất
       for (const item of batchResults) {
-        if (item.res && item.res.alive) {
+        if (item.res && item.res.alive && !item.res.blocked) {
           if (!bestAliveCandidate || (item.res.latency && item.res.latency < (bestAliveCandidate._verifiedLatency || 99999))) {
             bestAliveCandidate = item.candidate;
             bestAliveCandidate._verifiedLatency = item.res.latency;
@@ -554,20 +627,13 @@ export class AiAgentRunner {
     };
   }
 
-  // Ẩn danh CDP / Anti-Bot Stealth (Đồng bộ Timezone/Locale theo Proxy động mà không can thiệp prototype JS)
+  // Ẩn danh CDP / Anti-Bot Stealth — KHÔNG dùng CDP Emulation.setTimezoneOverride/setLocaleOverride
+  // vì lệnh này chỉ ghi đè Main Window, Dedicated Web Worker vẫn đọc timezone gốc của Windows
+  // -> DataDome bắt mismatch Main vs Worker -> đánh dấu CDP/Puppeteer.
+  // Timezone/Locale được ép từ tầng C++ Native qua baseFp.timezone / baseFp.navigator khi tạo profile.
   async _injectStealthEvasions(page) {
     if (!page || page.isClosed()) return;
-
-    try {
-      const geo = this._activeProxyGeo || { timezone: "America/New_York", locale: "en-US", languages: ["en-US", "en"] };
-
-      // Áp dụng CDP Emulation Override (Timezone & Locale theo Proxy động)
-      try {
-        const client = await page.target().createCDPSession();
-        if (geo.timezone) await client.send("Emulation.setTimezoneOverride", { timezoneId: geo.timezone }).catch(() => {});
-        if (geo.locale) await client.send("Emulation.setLocaleOverride", { locale: geo.locale }).catch(() => {});
-      } catch {}
-    } catch {}
+    return;
   }
 
   // Di chuột tự nhiên theo đường cong Bézier (Human-like Curve Trajectory)
@@ -601,6 +667,39 @@ export class AiAgentRunner {
         await this._safeSleep(8 + Math.floor(Math.random() * 12));
       }
     } catch {}
+  }
+
+  // Click phần tử bằng chuột vật lý CDP (isTrusted = true) kết hợp di chuột Bézier tự nhiên
+  async _humanClickElement(page, el) {
+    if (!page || page.isClosed() || !el) return false;
+    try {
+      const box = await el.boundingBox().catch(() => null);
+      if (!box || box.width <= 0 || box.height <= 0) {
+        // Fallback: click chuẩn qua Puppeteer handle với delay người thật
+        await el.click({ delay: 60 + Math.floor(Math.random() * 60) }).catch(() => {});
+        return true;
+      }
+
+      // Chọn điểm click ngẫu nhiên trong vùng nút (tránh click cứng 1 pixel)
+      const targetX = box.x + box.width / 2 + (Math.random() - 0.5) * (box.width * 0.4);
+      const targetY = box.y + box.height / 2 + (Math.random() - 0.5) * (box.height * 0.4);
+
+      await this._humanMouseMove(page, targetX, targetY);
+      await this._safeSleep(150 + Math.floor(Math.random() * 200));
+
+      await page.mouse.move(targetX, targetY);
+      await page.mouse.down({ button: "left" });
+      await this._safeSleep(70 + Math.floor(Math.random() * 70));
+      await page.mouse.up({ button: "left" });
+      await this._safeSleep(200 + Math.floor(Math.random() * 200));
+      return true;
+    } catch (err) {
+      try {
+        await el.click({ delay: 80 }).catch(() => {});
+        return true;
+      } catch {}
+      return false;
+    }
   }
 
 
@@ -1333,34 +1432,38 @@ export class AiAgentRunner {
         console.log("-> 1. Định vị và click nút chuyển sang chế độ Âm thanh (Audio Tab)...");
         let switchedToAudio = false;
 
+        // Human delay tự nhiên trước khi thao tác Captcha (tránh Rapid taps)
+        await this._safeSleep(1200 + Math.floor(Math.random() * 600));
+
+        const audioBtnSelectors = [
+          "#captcha__audio__button", "#captcha__audio", "button.audio-button", "button.audio-btn",
+          "button[data-type='audio']", "[aria-label*='audio' i]", "[title*='audio' i]", "[aria-label*='sound' i]"
+        ];
+
         for (let attempt = 1; attempt <= 5; attempt++) {
           const contexts = getAllContexts();
           for (const ctx of contexts) {
             try {
-              const clicked = await ctx.evaluate(() => {
-                const specificBtns = document.querySelectorAll("#captcha__audio__button, #captcha__audio, button.audio-button, button.audio-btn, button[data-type='audio'], [aria-label*='audio' i], [title*='audio' i], [aria-label*='sound' i]");
-                for (const b of specificBtns) {
-                  if (b && !b.hidden && b.getBoundingClientRect().width > 0) {
-                    b.scrollIntoView({ behavior: "smooth", block: "center" });
-                    b.click();
-                    return true;
+              for (const sel of audioBtnSelectors) {
+                const el = await ctx.$(sel).catch(() => null);
+                if (el) {
+                  const clicked = await this._humanClickElement(page, el);
+                  if (clicked) {
+                    switchedToAudio = true;
+                    break;
                   }
                 }
-                const headerButtons = Array.from(document.querySelectorAll("header button, div[class*='header'] button, div[class*='tab'] button, div[class*='toggle'] button, div[role='tablist'] button, div[role='tablist'] [role='tab']"));
-                if (headerButtons.length >= 2) {
-                  const audioBtn = headerButtons[1];
-                  if (audioBtn) {
-                    audioBtn.scrollIntoView({ behavior: "smooth", block: "center" });
-                    audioBtn.click();
-                    return true;
-                  }
-                }
-                return false;
-              });
+              }
+              if (switchedToAudio) break;
 
-              if (clicked) {
-                switchedToAudio = true;
-                break;
+              const headerButtons = await ctx.$$("header button, div[class*='header'] button, div[class*='tab'] button, div[class*='toggle'] button, div[role='tablist'] button, div[role='tablist'] [role='tab']").catch(() => []);
+              if (headerButtons.length >= 2) {
+                const audioBtn = headerButtons[1];
+                const clicked = await this._humanClickElement(page, audioBtn);
+                if (clicked) {
+                  switchedToAudio = true;
+                  break;
+                }
               }
             } catch {}
           }
@@ -1389,25 +1492,27 @@ export class AiAgentRunner {
         console.log("-> 2. Bấm nút Play phát âm thanh đọc dãy số (Chỉ bấm 1 lần duy nhất)...");
         let hasTriggeredPlay = false;
 
+        await this._safeSleep(800 + Math.floor(Math.random() * 500));
+
+        const playSelectors = [
+          "div.audio-captcha-play-container button", "#captcha__audio button",
+          "button[aria-label*='listen' i]", "button[aria-label*='play' i]",
+          "button.play-button", "button[class*='play']", "div[class*='play'] button"
+        ];
+
         const contexts = getAllContexts();
         for (const ctx of contexts) {
           if (hasTriggeredPlay) break;
           try {
-            const played = await ctx.evaluate(() => {
-              const playCandidates = Array.from(document.querySelectorAll("div.audio-captcha-play-container button, #captcha__audio button, button[aria-label*='listen' i], button[aria-label*='play' i], button.play-button, button[class*='play'], div[class*='play'] button"));
-              for (const b of playCandidates) {
-                if (b && !b.hidden && b.getBoundingClientRect().width > 0) {
-                  b.scrollIntoView({ behavior: "smooth", block: "center" });
-                  b.click();
-                  return true;
+            for (const sel of playSelectors) {
+              const el = await ctx.$(sel).catch(() => null);
+              if (el) {
+                const clicked = await this._humanClickElement(page, el);
+                if (clicked) {
+                  hasTriggeredPlay = true;
+                  break;
                 }
               }
-              return false;
-            });
-
-            if (played) {
-              hasTriggeredPlay = true;
-              break;
             }
           } catch {}
         }
@@ -1454,12 +1559,12 @@ export class AiAgentRunner {
           console.log(`🎯 [AI Speech-to-Text] Đã trích xuất thành công: [ \x1b[32m${recognizedDigits}\x1b[0m ]`);
           console.log(`-> Điền mã [${recognizedDigits}] vào form xác thực và gửi...`);
 
-          // 1. Nhập phím vào ô nhập số Captcha bằng CDP Keyboard
+          // 1. Nhập phím vào ô nhập số Captcha bằng chuột và bàn phím thật
           try {
             const firstInput = await page.$("input[type='text'], input[type='tel'], input[type='number'], #captcha__audio input, input[name*='captcha'], input[id*='audio']");
             if (firstInput) {
-              await firstInput.click();
-              await this._safeSleep(150);
+              await this._humanClickElement(page, firstInput);
+              await this._safeSleep(200);
               for (const digit of recognizedDigits) {
                 await page.keyboard.type(digit, { delay: this._randomDelay(80, 140) });
                 await this._safeSleep(40);
@@ -1467,27 +1572,35 @@ export class AiAgentRunner {
             }
           } catch {}
 
-          // 2. Click nút xác nhận Verify / Submit
-          await this._safeSleep(400);
+          // 2. Click nút xác nhận Verify / Submit bằng chuột thật
+          await this._safeSleep(600 + Math.floor(Math.random() * 400));
           const contextsAfter = getAllContexts();
+          let submitted = false;
+          const submitSelectors = [
+            ".audio-captcha-submit-button", "div.audio-captcha-submit-container > button",
+            "#captcha__audio button[type='submit']", "[aria-label*='verify' i]", "button[type='submit']"
+          ];
           for (const ctx of contextsAfter) {
+            if (submitted) break;
             try {
-              await ctx.evaluate(() => {
-                const submitBtns = Array.from(document.querySelectorAll(".audio-captcha-submit-button, div.audio-captcha-submit-container > button, #captcha__audio button[type='submit'], [aria-label*='verify' i], button[type='submit']"));
-                for (const btn of submitBtns) {
-                  if (btn && !btn.hidden && btn.getBoundingClientRect().width > 0) {
-                    btn.scrollIntoView({ behavior: "smooth", block: "center" });
-                    btn.click();
-                    return true;
+              for (const sel of submitSelectors) {
+                const el = await ctx.$(sel).catch(() => null);
+                if (el) {
+                  const clicked = await this._humanClickElement(page, el);
+                  if (clicked) {
+                    submitted = true;
+                    break;
                   }
                 }
-                const form = document.querySelector("#captcha__audio form, form");
-                if (form) {
-                  form.requestSubmit();
-                  return true;
-                }
-                return false;
-              });
+              }
+              if (!submitted) {
+                // Fallback nếu không định vị được handle: requestSubmit
+                await ctx.evaluate(() => {
+                  const form = document.querySelector("#captcha__audio form, form");
+                  if (form) { form.requestSubmit(); return true; }
+                  return false;
+                });
+              }
             } catch {}
           }
 
@@ -2338,7 +2451,7 @@ export class AiAgentRunner {
       console.log(`[ShardX] 🚀 Đang kết nối ShardX Launcher tại ${this._launcherApiUrl} (Chế độ: ${effectiveHeadless ? 'HEADLESS / ẨN TRÌNH DUYỆT' : 'HIỂN THỊ CỬA SỔ'})...`);
 
       const targetProf = options.profile || options.profileName || options.profileId || this._targetProfile;
-      const cloneTarget = options.cloneFrom || options.clone || (options.isClone ? targetProf : null);
+      const cloneTarget = options.cloneFrom || options.clone || this._cloneFrom || (options.isClone ? targetProf : null);
 
       // 1. NẾU SỬ DỤNG CHẾ ĐỘ CLONE TỪ PROFILE MẪU (Ví dụ: --clone=32231)
       if (cloneTarget) {
@@ -2541,15 +2654,16 @@ export class AiAgentRunner {
         longitude: proxyGeo.lon,
         accuracy: 15
       };
-      baseFp.webrtc = "block"; // Khóa chặt WebRTC không để lộ IP thật (Vietnam) khi dùng Proxy
+      baseFp.webrtc = "tcp_only"; // tcp_only: cho phép WebRTC hoạt động nhưng fake IP public -> IP proxy (trông tự nhiên như user thật, không lộ IP VN)
       baseFp.noise = {
-        audio: { enabled: false },
-        canvas: { enabled: false },
-        client_rects: { enabled: false, max_offset: 0 },
-        fonts: { enabled: false },
-        sensors: { enabled: false },
-        webgl: { enabled: false, intensity: 0 }
+        audio: { enabled: true, intensity: 0.0002 },
+        canvas: { enabled: true, intensity: 0.0002 },
+        client_rects: { enabled: true, max_offset: 0.5 },
+        fonts: { enabled: true },
+        sensors: { enabled: true, intensity: 0.0002 },
+        webgl: { enabled: true, intensity: 0.0002 }
       };
+      console.log("⚠️  [Anti-Detect] Đã bật noise + webrtc=tcp_only để tránh device fingerprint trùng giữa các phiên");
       baseFp.blocked_ports = [1080, 3030, 3128, 3389, 5800, 5900, 5901, 5938, 6568, 7070, 8080];
       
       // BƯỚC 3: TẠO PROFILE MỚI THUỘC NHÓM 'GitHub-Auto'
@@ -2599,15 +2713,15 @@ export class AiAgentRunner {
         notes: `Tách biệt hoàn toàn | Proxy: ${formattedProxy || 'Direct'} | Ping: ${chosenProxy?._verifiedLatency ? `${chosenProxy._verifiedLatency}ms` : '<1.5s'} | Time: ${new Date().toLocaleTimeString()}`,
         proxy: formattedProxy,
         proxy_id: registeredProxyId,
-        webrtc: "block", // Chặn tuyệt đối WebRTC STUN query làm rò rỉ IP máy thật
+        webrtc: "tcp_only", // tcp_only: giả lập WebRTC với IP proxy, tránh bị đánh dấu bất thường so với "block"
         fingerprint: baseFp,
         noise: {
-          audio: { enabled: false },
-          canvas: { enabled: false },
-          client_rects: { enabled: false, max_offset: 0 },
-          fonts: { enabled: false },
-          sensors: { enabled: false },
-          webgl: { enabled: false, intensity: 0 }
+          audio: { enabled: true, intensity: 0.0002 },
+          canvas: { enabled: true, intensity: 0.0002 },
+          client_rects: { enabled: true, max_offset: 0.5 },
+          fonts: { enabled: true },
+          sensors: { enabled: true, intensity: 0.0002 },
+          webgl: { enabled: true, intensity: 0.0002 }
         }
       };
 

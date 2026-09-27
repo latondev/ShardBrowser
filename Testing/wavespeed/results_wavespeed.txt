@@ -1,0 +1,4 @@
+FAILED|litalienkussmaul104@outlook.com|An `executablePath` or `channel` must be specified for `puppeteer-core`
+FAILED|litalienkussmaul104@outlook.com|An `executablePath` or `channel` must be specified for `puppeteer-core`
+FAILED|litalienkussmaul104@outlook.com|Không tìm thấy phần tử có chữ: /sign in with github/i
+FAILED|litalienkussmaul104@outlook.com|Execution context was destroyed
