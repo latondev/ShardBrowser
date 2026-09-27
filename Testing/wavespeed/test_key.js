@@ -58,5 +58,4 @@ async function testApiKey() {
   }
 }
 
-
 testApiKey();

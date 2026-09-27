@@ -1,0 +1,18 @@
+{
+  "name": "wavespeed-automation",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Automation script suite for WaveSpeed.ai via ShardBrowser & Puppeteer",
+  "main": "batch_runner.js",
+  "scripts": {
+    "start": "node batch_runner.js",
+    "batch": "node batch_runner.js",
+    "single": "node wavespeed_automation.js",
+    "test-key": "node test_key.js",
+    "oauth-check": "node wavespeed-github-oauth-check.mjs"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "puppeteer-core": "^23.0.0"
+  }
+}
