@@ -127,9 +127,10 @@ function getTotpCode(secret, time = Date.now()) {
 // ==============================================================================
 // 5. PHÁT HIỆN TÀI KHOẢN GITHUB BỊ CỜ / KHÓA (FLAGGED ACCOUNT DETECTOR)
 // ==============================================================================
-const restrictionPattern = /(?:this account is flagged[\s\S]{0,500}cannot authorize a third party application|cannot authorize a third party application)/i;
+const restrictionPattern = /(?:this account is flagged[\s\S]{0,500}cannot authorize a third party application|cannot authorize a third party application|account suspended|access to your account has been suspended|violation of our terms of service|your account has been locked)/i;
 
-function detectGithubRestriction(text) {
+function detectGithubRestriction(text, url = "") {
+  if ((url || "").includes("/suspended")) return true;
   return restrictionPattern.test(text || "");
 }
 
@@ -485,10 +486,10 @@ async function handleGithubAuthFlow(page, account) {
     }
 
     // 2. PHÁT HIỆN TÀI KHOẢN GITHUB BỊ CỜ / KHÓA BỞI GITHUB
-    if (currentUrl.includes("github.com") && detectGithubRestriction(pageText)) {
+    if (currentUrl.includes("/suspended") || (currentUrl.includes("github.com") && detectGithubRestriction(pageText, currentUrl))) {
       const cleanEmail = account.email.replace(/[^a-zA-Z0-9_-]/g, "_");
       await saveScreenshot(page, `github-flagged-${cleanEmail}.png`);
-      console.error(`❌ [BLOCKED] Tài khoản GitHub [${account.email}] bị hạn chế (Account Flagged) không thể ủy quyền OAuth!`);
+      console.error(`❌ [BLOCKED] Tài khoản GitHub [${account.email}] bị hạn chế (Account Flagged / Suspended) không thể ủy quyền OAuth!`);
       throw new Error("BLOCKED_ACCOUNT_FLAGGED: GitHub blocked third-party OAuth authorization");
     }
 

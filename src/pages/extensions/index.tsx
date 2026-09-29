@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { Button, Input, Switch, cn } from "@proxyshard/shardx-ui-kit";
 import { Topbar } from "../../shared/ui/Topbar";
 import { CopyField } from "../../shared/ui/CopyField";
@@ -10,6 +11,8 @@ import {
   NavExtensionsIcon,
   DeleteIcon,
   InfoIcon,
+  RefreshIcon,
+  FolderIcon,
 } from "../../shared/icons";
 import type { ExtensionInfo } from "../../entities/extension";
 import {
@@ -17,18 +20,24 @@ import {
   extensionAdd,
   extensionToggle,
   extensionDelete,
+  extensionReload,
+  extensionDir,
 } from "../../entities/extension";
 
 function ExtensionDetailModal({
   ext,
+  isReloading,
   onClose,
   onRemove,
   onToggle,
+  onReload,
 }: {
   ext: ExtensionInfo;
+  isReloading: boolean;
   onClose: () => void;
   onRemove: (id: string, name: string) => void;
   onToggle: (id: string, enabled: boolean) => void;
+  onReload: (ext: ExtensionInfo, overrideSource?: string) => Promise<void>;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs" onClick={onClose}>
@@ -79,10 +88,64 @@ function ExtensionDetailModal({
           </div>
 
           <div>
-            <span className="text-label-xs font-medium text-text-sub-600">Location on disk</span>
-            <div className="mt-1">
-              <CopyField value={ext.path} />
+            <span className="text-label-xs font-medium text-text-sub-600">Installed Location</span>
+            <div className="mt-1 flex items-center gap-2">
+              <div className="flex-1">
+                <CopyField value={ext.path} />
+              </div>
+              <Button
+                variant="neutral"
+                mode="stroke"
+                size="small"
+                title="Open installed folder in Explorer"
+                onClick={() => openPath(ext.path).catch((e) => toast.err(String(e)))}
+              >
+                <FolderIcon className="size-3.5" />
+                Open
+              </Button>
             </div>
+          </div>
+
+          <div>
+            <span className="text-label-xs font-medium text-text-sub-600">Development Source Folder</span>
+            <div className="mt-1 flex items-center gap-2">
+              <div className="flex-1">
+                <CopyField value={ext.source_path || "Not linked"} />
+              </div>
+              {ext.source_path && (
+                <Button
+                  variant="neutral"
+                  mode="stroke"
+                  size="small"
+                  title="Open source folder in Explorer"
+                  onClick={() => openPath(ext.source_path!).catch((e) => toast.err(String(e)))}
+                >
+                  <FolderIcon className="size-3.5" />
+                  Open
+                </Button>
+              )}
+              <Button
+                variant="neutral"
+                mode="stroke"
+                size="small"
+                title="Select or change development source folder"
+                onClick={async () => {
+                  const selected = await open({
+                    directory: true,
+                    multiple: false,
+                    title: `Select source folder for "${ext.name}" (containing manifest.json)`,
+                  });
+                  if (typeof selected === "string") {
+                    onReload(ext, selected);
+                  }
+                }}
+              >
+                Change...
+              </Button>
+            </div>
+            <p className="mt-1 text-[11px] text-text-soft-400">
+              When updating extension code in your development folder, click Reload to sync updates into ShardBrowser.
+            </p>
           </div>
 
           {ext.permissions && ext.permissions.length > 0 && (
@@ -112,6 +175,16 @@ function ExtensionDetailModal({
 
             <div className="flex items-center gap-2">
               <Button
+                variant="primary"
+                mode="stroke"
+                size="small"
+                disabled={isReloading}
+                onClick={() => onReload(ext)}
+              >
+                <RefreshIcon className={cn("size-3.5", isReloading && "animate-spin")} />
+                Reload
+              </Button>
+              <Button
                 variant="error"
                 mode="stroke"
                 size="small"
@@ -136,6 +209,7 @@ function ExtensionDetailModal({
 export function ExtensionsPage() {
   const [extensions, setExtensions] = useState<ExtensionInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reloadingId, setReloadingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [detailExt, setDetailExt] = useState<ExtensionInfo | null>(null);
 
@@ -165,6 +239,62 @@ export function ExtensionsPage() {
       toast.err(String(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const reloadExtension = async (ext: ExtensionInfo, overrideSource?: string) => {
+    try {
+      setReloadingId(ext.id);
+      let targetSource = overrideSource;
+
+      if (!targetSource && !ext.source_path) {
+        const selected = await open({
+          directory: true,
+          multiple: false,
+          title: `Select Source Folder for "${ext.name}" (containing manifest.json)`,
+        });
+        if (typeof selected !== "string") {
+          setReloadingId(null);
+          return;
+        }
+        targetSource = selected;
+      }
+
+      try {
+        const updated = await extensionReload(ext.id, targetSource);
+        setExtensions((prev: ExtensionInfo[]) =>
+          prev.map((e) => (e.id === ext.id ? updated : e))
+        );
+        if (detailExt?.id === ext.id) {
+          setDetailExt(updated);
+        }
+        toast.ok(`Extension "${updated.name}" reloaded to v${updated.version}! (Restart browser profiles to apply)`);
+      } catch (err: any) {
+        const msg = String(err);
+        if (msg.includes("NO_SOURCE_PATH") || msg.includes("Source folder") || msg.includes("not exist")) {
+          const selected = await open({
+            directory: true,
+            multiple: false,
+            title: `Select Source Folder for "${ext.name}" (containing manifest.json)`,
+          });
+          if (typeof selected === "string") {
+            const updated = await extensionReload(ext.id, selected);
+            setExtensions((prev: ExtensionInfo[]) =>
+              prev.map((e) => (e.id === ext.id ? updated : e))
+            );
+            if (detailExt?.id === ext.id) {
+              setDetailExt(updated);
+            }
+            toast.ok(`Linked & reloaded "${updated.name}" (v${updated.version})!`);
+          }
+        } else {
+          toast.err(msg);
+        }
+      }
+    } catch (e) {
+      toast.err(String(e));
+    } finally {
+      setReloadingId(null);
     }
   };
 
@@ -225,6 +355,38 @@ export function ExtensionsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="neutral"
+            mode="stroke"
+            size="small"
+            title="Open extensions library folder in Explorer"
+            onClick={async () => {
+              try {
+                const dir = await extensionDir();
+                await openPath(dir);
+              } catch (e) {
+                toast.err(String(e));
+              }
+            }}
+          >
+            <FolderIcon className="size-3.5" />
+            Open Folder
+          </Button>
+
+          <Button
+            variant="neutral"
+            mode="stroke"
+            size="small"
+            title="Refresh extension list"
+            onClick={() => {
+              load();
+              toast.ok("Extensions list refreshed");
+            }}
+          >
+            <RefreshIcon className="size-3.5" />
+            Refresh
+          </Button>
+
           <Button
             variant="primary"
             mode="filled"
@@ -340,14 +502,27 @@ export function ExtensionsPage() {
                   Inspect details
                 </button>
 
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-error-base hover:text-error-hover font-medium cursor-pointer"
-                  onClick={() => remove(ext.id, ext.name)}
-                >
-                  <DeleteIcon className="size-3.5" />
-                  Remove
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={reloadingId === ext.id}
+                    className="flex items-center gap-1 text-text-sub-600 hover:text-text-strong-950 font-medium cursor-pointer disabled:opacity-50"
+                    title={ext.source_path ? `Reload from: ${ext.source_path}` : "Select source folder & reload"}
+                    onClick={() => reloadExtension(ext)}
+                  >
+                    <RefreshIcon className={cn("size-3.5", reloadingId === ext.id && "animate-spin")} />
+                    Reload
+                  </button>
+
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-error-base hover:text-error-hover font-medium cursor-pointer"
+                    onClick={() => remove(ext.id, ext.name)}
+                  >
+                    <DeleteIcon className="size-3.5" />
+                    Remove
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -357,9 +532,11 @@ export function ExtensionsPage() {
       {detailExt && (
         <ExtensionDetailModal
           ext={detailExt}
+          isReloading={reloadingId === detailExt.id}
           onClose={() => setDetailExt(null)}
           onRemove={remove}
           onToggle={toggle}
+          onReload={reloadExtension}
         />
       )}
     </section>

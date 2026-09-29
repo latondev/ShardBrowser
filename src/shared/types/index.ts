@@ -6,6 +6,7 @@ export type ExtensionInfo = {
   version: string;
   description: string;
   path: string;
+  source_path?: string | null;
   icon_base64?: string | null;
   enabled: boolean;
   permissions?: string[];

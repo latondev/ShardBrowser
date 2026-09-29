@@ -8,9 +8,27 @@
 #>
 
 param (
-    [string]$FilePath = "D:\YTB\Resgiter_AI\ShardBrowser\Testing\Check2faGit\output_1.txt",
-    [string]$OutputDir = "D:\YTB\Resgiter_AI\ShardBrowser\Testing\Check2faGit\Results_CheckFlag"
+    [string]$FilePath = "",
+    [string]$OutputDir = ""
 )
+
+if (-not $OutputDir) {
+    $OutputDir = Join-Path $PSScriptRoot "Results_CheckFlag"
+}
+
+if (-not $FilePath) {
+    $candidates = @(
+        (Join-Path $PSScriptRoot "github_accounts.txt"),
+        (Join-Path $PSScriptRoot "..\wavespeed\accounts.txt"),
+        (Join-Path $PSScriptRoot "output_1.txt")
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c) {
+            $FilePath = (Resolve-Path $c).Path
+            break
+        }
+    }
+}
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Net.Http

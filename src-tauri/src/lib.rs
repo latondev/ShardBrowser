@@ -64,6 +64,7 @@ pub struct ExtensionInfo {
     pub version: String,
     pub description: String,
     pub path: String,
+    pub source_path: Option<String>,
     pub icon_base64: Option<String>,
     pub enabled: bool,
     pub permissions: Vec<String>,
@@ -151,10 +152,140 @@ fn extract_icon_base64(ext_dir: &std::path::Path, val: &serde_json::Value) -> Op
     None
 }
 
+fn load_extension_sources() -> std::collections::HashMap<String, String> {
+    if let Ok(root) = store::config_root() {
+        let p = root.join("extension_sources.json");
+        if let Ok(s) = std::fs::read_to_string(p) {
+            if let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, String>>(&s) {
+                return map;
+            }
+        }
+    }
+    std::collections::HashMap::new()
+}
+
+fn save_extension_sources(map: &std::collections::HashMap<String, String>) {
+    if let Ok(root) = store::config_root() {
+        let p = root.join("extension_sources.json");
+        if let Ok(s) = serde_json::to_string_pretty(map) {
+            let _ = std::fs::write(p, s);
+        }
+    }
+}
+
+fn resolve_extension_source(id: &str, sources: &mut std::collections::HashMap<String, String>) -> Option<String> {
+    if let Some(s) = sources.get(id) {
+        if std::path::Path::new(s).exists() {
+            return Some(s.clone());
+        }
+    }
+    // Auto-detect common project folders if previously added without extension_sources.json
+    let candidates = [
+        format!("F:\\ToolAllvideo\\Extension\\{}", id),
+        format!("F:\\ToolAllvideo\\extensions\\{}", id),
+    ];
+    for cand in &candidates {
+        let p = std::path::Path::new(cand);
+        if p.exists() && p.is_dir() && p.join("manifest.json").exists() {
+            sources.insert(id.to_string(), cand.clone());
+            save_extension_sources(sources);
+            return Some(cand.clone());
+        }
+    }
+    None
+}
+
+fn sync_extension_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let target = dst.join(entry.file_name());
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            sync_extension_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    // Clean up files in dst that were removed from src
+    if let Ok(entries) = std::fs::read_dir(dst) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let src_counterpart = src.join(&name);
+            if !src_counterpart.exists() {
+                let p = entry.path();
+                if let Ok(ty) = entry.file_type() {
+                    if ty.is_dir() {
+                        let _ = std::fs::remove_dir_all(&p);
+                    } else {
+                        let _ = std::fs::remove_file(&p);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_extension_info(id: &str, dir: &std::path::Path, source_path: Option<String>, enabled: bool) -> ExtensionInfo {
+    let manifest_file = dir.join("manifest.json");
+    let mut name = id.to_string();
+    let mut version = "1.0.0".to_string();
+    let mut description = String::new();
+    let mut icon_base64 = None;
+    let mut permissions = Vec::new();
+    let mut inspect_views = Vec::new();
+
+    if manifest_file.exists() {
+        if let Ok(content) = std::fs::read_to_string(&manifest_file) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(n) = val.get("name").and_then(|v| v.as_str()) {
+                    name = n.to_string();
+                }
+                if let Some(v) = val.get("version").and_then(|v| v.as_str()) {
+                    version = v.to_string();
+                }
+                if let Some(d) = val.get("description").and_then(|v| v.as_str()) {
+                    description = d.to_string();
+                }
+                if let Some(perms) = val.get("permissions").and_then(|v| v.as_array()) {
+                    for p in perms {
+                        if let Some(s) = p.as_str() {
+                            permissions.push(s.to_string());
+                        }
+                    }
+                }
+                if let Some(bg) = val.get("background").and_then(|v| v.as_object()) {
+                    if bg.get("service_worker").is_some() {
+                        inspect_views.push("service worker (Inactive)".to_string());
+                    } else if bg.get("page").is_some() || bg.get("scripts").is_some() {
+                        inspect_views.push("background page".to_string());
+                    }
+                }
+                icon_base64 = extract_icon_base64(dir, &val);
+            }
+        }
+    }
+
+    ExtensionInfo {
+        id: id.to_string(),
+        name,
+        version,
+        description,
+        path: dir.to_string_lossy().to_string(),
+        source_path,
+        icon_base64,
+        enabled,
+        permissions,
+        inspect_views,
+    }
+}
+
 #[tauri::command]
 fn extension_list() -> Result<Vec<ExtensionInfo>, String> {
     let global_ext_dir = store::extensions_dir().map_err(|e| e.to_string())?;
     let disabled_set = load_disabled_extensions();
+    let mut sources = load_extension_sources();
     let mut list = Vec::new();
 
     if let Ok(entries) = std::fs::read_dir(&global_ext_dir) {
@@ -162,58 +293,9 @@ fn extension_list() -> Result<Vec<ExtensionInfo>, String> {
             let path = entry.path();
             if path.is_dir() {
                 let id = entry.file_name().to_string_lossy().to_string();
-                let manifest_file = path.join("manifest.json");
-                let mut name = id.clone();
-                let mut version = "1.0.0".to_string();
-                let mut description = String::new();
-                let mut icon_base64 = None;
-                let mut permissions = Vec::new();
-                let mut inspect_views = Vec::new();
-
-                if manifest_file.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&manifest_file) {
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                            if let Some(n) = val.get("name").and_then(|v| v.as_str()) {
-                                name = n.to_string();
-                            }
-                            if let Some(v) = val.get("version").and_then(|v| v.as_str()) {
-                                version = v.to_string();
-                            }
-                            if let Some(d) = val.get("description").and_then(|v| v.as_str()) {
-                                description = d.to_string();
-                            }
-                            if let Some(perms) = val.get("permissions").and_then(|v| v.as_array()) {
-                                for p in perms {
-                                    if let Some(s) = p.as_str() {
-                                        permissions.push(s.to_string());
-                                    }
-                                }
-                            }
-                            if let Some(bg) = val.get("background").and_then(|v| v.as_object()) {
-                                if bg.get("service_worker").is_some() {
-                                    inspect_views.push("service worker (Inactive)".to_string());
-                                } else if bg.get("page").is_some() || bg.get("scripts").is_some() {
-                                    inspect_views.push("background page".to_string());
-                                }
-                            }
-                            icon_base64 = extract_icon_base64(&path, &val);
-                        }
-                    }
-                }
-
                 let enabled = !disabled_set.contains(&id);
-
-                list.push(ExtensionInfo {
-                    id,
-                    name,
-                    version,
-                    description,
-                    path: path.to_string_lossy().to_string(),
-                    icon_base64,
-                    enabled,
-                    permissions,
-                    inspect_views,
-                });
+                let source_path = resolve_extension_source(&id, &mut sources);
+                list.push(parse_extension_info(&id, &path, source_path, enabled));
             }
         }
     }
@@ -242,6 +324,11 @@ fn extension_delete(id: String) -> Result<(), String> {
     let mut set = load_disabled_extensions();
     set.remove(&id);
     save_disabled_extensions(&set);
+
+    let mut sources = load_extension_sources();
+    sources.remove(&id);
+    save_extension_sources(&sources);
+
     Ok(())
 }
 
@@ -263,69 +350,61 @@ fn extension_add(source_dir: String) -> Result<ExtensionInfo, String> {
     let global_ext_dir = store::extensions_dir().map_err(|e| e.to_string())?;
     let dest = global_ext_dir.join(&folder_name);
 
-    fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(dst)?;
-        for entry in std::fs::read_dir(src)? {
-            let entry = entry?;
-            let ty = entry.file_type()?;
-            if ty.is_dir() {
-                copy_dir_all(&entry.path(), &dst.join(entry.file_name()))?;
-            } else {
-                std::fs::copy(entry.path(), dst.join(entry.file_name()))?;
-            }
-        }
-        Ok(())
+    sync_extension_dir(&src, &dest).map_err(|e| format!("Failed to copy extension folder: {e}"))?;
+
+    let mut sources = load_extension_sources();
+    sources.insert(folder_name.clone(), source_dir.clone());
+    save_extension_sources(&sources);
+
+    let disabled_set = load_disabled_extensions();
+    let enabled = !disabled_set.contains(&folder_name);
+
+    Ok(parse_extension_info(&folder_name, &dest, Some(source_dir), enabled))
+}
+
+#[tauri::command]
+fn extension_dir() -> Result<String, String> {
+    let global_ext_dir = store::extensions_dir().map_err(|e| e.to_string())?;
+    Ok(global_ext_dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn extension_reload(id: String, source_dir: Option<String>) -> Result<ExtensionInfo, String> {
+    let global_ext_dir = store::extensions_dir().map_err(|e| e.to_string())?;
+    let dest = global_ext_dir.join(&id);
+    if !dest.exists() || !dest.is_dir() {
+        return Err(format!("Extension folder '{id}' does not exist in library."));
     }
 
-    copy_dir_all(&src, &dest).map_err(|e| format!("Failed to copy extension folder: {e}"))?;
-
-    let mut name = folder_name.clone();
-    let mut version = "1.0.0".to_string();
-    let mut description = String::new();
-    let mut icon_base64 = None;
-    let mut permissions = Vec::new();
-    let mut inspect_views = Vec::new();
-
-    if let Ok(content) = std::fs::read_to_string(dest.join("manifest.json")) {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(n) = val.get("name").and_then(|v| v.as_str()) {
-                name = n.to_string();
-            }
-            if let Some(v) = val.get("version").and_then(|v| v.as_str()) {
-                version = v.to_string();
-            }
-            if let Some(d) = val.get("description").and_then(|v| v.as_str()) {
-                description = d.to_string();
-            }
-            if let Some(perms) = val.get("permissions").and_then(|v| v.as_array()) {
-                for p in perms {
-                    if let Some(s) = p.as_str() {
-                        permissions.push(s.to_string());
-                    }
-                }
-            }
-            if let Some(bg) = val.get("background").and_then(|v| v.as_object()) {
-                if bg.get("service_worker").is_some() {
-                    inspect_views.push("service worker (Inactive)".to_string());
-                } else if bg.get("page").is_some() || bg.get("scripts").is_some() {
-                    inspect_views.push("background page".to_string());
-                }
-            }
-            icon_base64 = extract_icon_base64(&dest, &val);
+    let mut sources = load_extension_sources();
+    let effective_source: Option<std::path::PathBuf> = if let Some(ref s) = source_dir {
+        let path = std::path::PathBuf::from(s);
+        if !path.exists() || !path.is_dir() {
+            return Err(format!("Source folder '{}' does not exist.", s));
         }
+        if !path.join("manifest.json").exists() {
+            return Err("manifest.json not found in the selected folder. Please pick an unpacked Chrome extension folder.".to_string());
+        }
+        sources.insert(id.clone(), s.clone());
+        save_extension_sources(&sources);
+        Some(path)
+    } else if let Some(s) = resolve_extension_source(&id, &mut sources) {
+        Some(std::path::PathBuf::from(s))
+    } else {
+        None
+    };
+
+    if let Some(src) = effective_source {
+        sync_extension_dir(&src, &dest).map_err(|e| format!("Failed to sync extension files: {e}"))?;
+    } else {
+        return Err("NO_SOURCE_PATH".to_string());
     }
 
-    Ok(ExtensionInfo {
-        id: folder_name,
-        name,
-        version,
-        description,
-        path: dest.to_string_lossy().to_string(),
-        icon_base64,
-        enabled: true,
-        permissions,
-        inspect_views,
-    })
+    let disabled_set = load_disabled_extensions();
+    let enabled = !disabled_set.contains(&id);
+    let src_path = sources.get(&id).cloned();
+
+    Ok(parse_extension_info(&id, &dest, src_path, enabled))
 }
 
 // ---- Autonomous AI Agent ----
@@ -1788,6 +1867,8 @@ pub fn run() {
             extension_add,
             extension_delete,
             extension_toggle,
+            extension_reload,
+            extension_dir,
             ai_agent_start,
             ai_agent_stop,
             ai_agent_is_running,

@@ -12,3 +12,10 @@ export const extensionToggle = (id: string, enabled: boolean): Promise<void> =>
 
 export const extensionDelete = (id: string): Promise<void> =>
   invoke<void>("extension_delete", { id });
+
+export const extensionReload = (id: string, sourceDir?: string): Promise<ExtensionInfo> =>
+  invoke<ExtensionInfo>("extension_reload", { id, sourceDir: sourceDir ?? null });
+
+export const extensionDir = (): Promise<string> =>
+  invoke<string>("extension_dir");
+

@@ -55,6 +55,40 @@ function parseArgs() {
   return options;
 }
 
+function isSuspendedOrFlagged(text, url) {
+  const t = (text || "").toLowerCase();
+  const u = (url || "").toLowerCase();
+
+  if (
+    u.includes("/suspended") ||
+    t.includes("account suspended") ||
+    t.includes("has been suspended") ||
+    t.includes("violation of our terms of service") ||
+    t.includes("your account has been locked")
+  ) {
+    return {
+      blocked: true,
+      status: "SUSPENDED",
+      reason: "Account suspended: Access to your account has been suspended due to a violation of our Terms of Service.",
+    };
+  }
+
+  if (
+    t.includes("this account is flagged") ||
+    t.includes("cannot authorize a third party application") ||
+    t.includes("your account has been flagged") ||
+    (u.includes("github.com/dashboard") && !u.includes("supabase"))
+  ) {
+    return {
+      blocked: true,
+      status: "FLAGGED",
+      reason: "This account is flagged, and therefore cannot authorize a third party application.",
+    };
+  }
+
+  return { blocked: false };
+}
+
 async function checkAccountRealOAuth(browser, acc, totpEngine) {
   const context = await browser.createBrowserContext();
   const page = await context.newPage();
@@ -98,12 +132,22 @@ async function checkAccountRealOAuth(browser, acc, totpEngine) {
     let currentUrl = page.url();
     let bodyText = await page.evaluate(() => document.body?.innerText || "");
 
-    // Kiểm tra sai mật khẩu
+    // 3.1. Kiểm tra tài khoản bị Suspended hoặc Flagged ngay sau login
+    const checkAfterLogin = isSuspendedOrFlagged(bodyText, currentUrl);
+    if (checkAfterLogin.blocked) {
+      return {
+        status: checkAfterLogin.status,
+        reason: checkAfterLogin.reason,
+        url: currentUrl,
+      };
+    }
+
+    // 3.2. Kiểm tra sai mật khẩu
     if (bodyText.includes("Incorrect username or password") || (currentUrl.includes("/login") && !currentUrl.includes("two-factor"))) {
       return { status: "WRONG_PASSWORD", error: "Sai mật khẩu hoặc bị khóa đăng nhập" };
     }
 
-    // Kiểm tra đòi mã email
+    // 3.3. Kiểm tra đòi mã email
     if (currentUrl.includes("verified-device") || bodyText.includes("Device verification") || bodyText.includes("sent a verification code")) {
       return { status: "NOT_2FA_EMAIL_CODE", error: "Chưa bật 2FA (Đòi mã xác minh Email)" };
     }
@@ -125,6 +169,18 @@ async function checkAccountRealOAuth(browser, acc, totpEngine) {
       }
     }
 
+    // 4.1. Kiểm tra lại sau bước 2FA
+    currentUrl = page.url();
+    bodyText = await page.evaluate(() => document.body?.innerText || "");
+    const checkAfter2fa = isSuspendedOrFlagged(bodyText, currentUrl);
+    if (checkAfter2fa.blocked) {
+      return {
+        status: checkAfter2fa.status,
+        reason: checkAfter2fa.reason,
+        url: currentUrl,
+      };
+    }
+
     // 5. Kiểm tra nếu có nút "Authorize" trên trang GitHub
     if (page.url().includes("github.com/login/oauth/authorize")) {
       await page.evaluate(() => {
@@ -134,26 +190,34 @@ async function checkAccountRealOAuth(browser, acc, totpEngine) {
       await sleep(4000);
     }
 
-    // 6. KIỂM TRA KẾT QUẢ FLAGGED
+    // 6. KIỂM TRA KẾT QUẢ CUỐI CÙNG
     const finalUrl = page.url();
     const finalBodyText = await page.evaluate(() => document.body?.innerText || "");
 
-    const isFlagged = finalUrl.includes("github.com/dashboard") ||
-                      finalBodyText.includes("This account is flagged") ||
-                      finalBodyText.includes("cannot authorize a third party application") ||
-                      finalBodyText.includes("Your account has been flagged");
-
-    if (isFlagged) {
+    const checkFinal = isSuspendedOrFlagged(finalBodyText, finalUrl);
+    if (checkFinal.blocked) {
       return {
-        status: "FLAGGED",
-        reason: "This account is flagged, and therefore cannot authorize a third party application.",
+        status: checkFinal.status,
+        reason: checkFinal.reason,
+        url: finalUrl,
+      };
+    }
+
+    // Phải thực sự chuyển hướng về ứng dụng bên thứ 3 hoặc hoàn tất OAuth
+    const isSuccess = (finalUrl.includes("supabase.com") && !finalUrl.includes("/sign-in")) ||
+                      (!finalUrl.includes("github.com/login") && !finalUrl.includes("github.com/session") && !finalUrl.includes("github.com/suspended"));
+
+    if (isSuccess && !finalUrl.includes("github.com")) {
+      return {
+        status: "CLEAN",
+        message: "Tài khoản sạch, ủy quyền bên thứ 3 thành công",
         url: finalUrl,
       };
     }
 
     return {
-      status: "CLEAN",
-      message: "Tài khoản sạch, ủy quyền bên thứ 3 thành công",
+      status: "FAILED",
+      error: `Chưa hoàn tất ủy quyền (vẫn ở ${finalUrl})`,
       url: finalUrl,
     };
 
@@ -186,12 +250,14 @@ async function main() {
   }
 
   const fileClean = path.join(options.outputDir, "github_clean_accounts.txt");
+  const fileSuspended = path.join(options.outputDir, "github_suspended_accounts.txt");
   const fileFlagged = path.join(options.outputDir, "github_flagged_oauth.txt");
   const fileFailed = path.join(options.outputDir, "github_failed_login.txt");
   const fileSummaryJson = path.join(options.outputDir, "oauth_summary.json");
 
   // Xóa kết quả cũ
   writeFileSync(fileClean, "", "utf-8");
+  writeFileSync(fileSuspended, "", "utf-8");
   writeFileSync(fileFlagged, "", "utf-8");
   writeFileSync(fileFailed, "", "utf-8");
 
@@ -224,6 +290,7 @@ async function main() {
   });
 
   let cleanCount = 0;
+  let suspendedCount = 0;
   let flaggedCount = 0;
   let failedCount = 0;
 
@@ -241,6 +308,10 @@ async function main() {
         cleanCount++;
         console.log(`✅ ${prefix} -> [TÀI KHOẢN SẠCH] (Ủy quyền bên thứ 3 OK)`);
         appendFileSync(fileClean, `${acc.raw}\n`, "utf-8");
+      } else if (result.status === "SUSPENDED") {
+        suspendedCount++;
+        console.log(`🚫 ${prefix} -> [TÀI KHOẢN BỊ SUSPENDED / KHÓA VĨNH VIỄN 🚫]: ${result.reason}`);
+        appendFileSync(fileSuspended, `${acc.raw} | SUSPENDED: ${result.reason}\n`, "utf-8");
       } else if (result.status === "FLAGGED") {
         flaggedCount++;
         console.log(`❌ ${prefix} -> [BỊ FLAGGED GẮN CỜ ❌]: ${result.reason}`);
@@ -263,6 +334,7 @@ async function main() {
   const summary = {
     Total: total,
     Clean: cleanCount,
+    Suspended: suspendedCount,
     Flagged: flaggedCount,
     Failed: failedCount,
     Timestamp: new Date().toISOString(),
@@ -272,14 +344,18 @@ async function main() {
   console.log("\n================================================================================");
   console.log("                        TỔNG KẾT QUÉT OAUTH THIRD-PARTY                         ");
   console.log("================================================================================");
-  console.log(`Tổng số tài khoản đã quét         : ${total}`);
-  console.log(`✅ SẠCH (Cấp quyền bên thứ 3 OK)   : ${cleanCount} tài khoản`);
-  console.log(`❌ BỊ FLAGGED (Không thể cấp quyền): ${flaggedCount} tài khoản`);
-  console.log(`⚠️ Thất bại / Sai mật khẩu / Lỗi  : ${failedCount} tài khoản`);
+  console.log(`Tổng số tài khoản đã quét            : ${total}`);
+  console.log(`✅ SẠCH (Cấp quyền bên thứ 3 OK)      : ${cleanCount} tài khoản`);
+  console.log(`🚫 BỊ SUSPENDED (Khóa ToS vĩnh viễn) : ${suspendedCount} tài khoản`);
+  console.log(`❌ BỊ FLAGGED (Không thể cấp quyền)  : ${flaggedCount} tài khoản`);
+  console.log(`⚠️ Thất bại / Sai mật khẩu / Lỗi     : ${failedCount} tài khoản`);
   console.log("--------------------------------------------------------------------------------");
-  console.log(`📁 File TÀI KHOẢN SẠCH đã lưu     : ${fileClean}`);
-  console.log(`📁 File TÀI KHOẢN BỊ FLAGGED đã lưu: ${fileFlagged}`);
+  console.log(`📁 File TÀI KHOẢN SẠCH đã lưu        : ${fileClean}`);
+  console.log(`📁 File TÀI KHOẢN BỊ SUSPENDED đã lưu: ${fileSuspended}`);
+  console.log(`📁 File TÀI KHOẢN BỊ FLAGGED đã lưu  : ${fileFlagged}`);
+  console.log(`📁 File THẤT BẠI/LỖI đã lưu          : ${fileFailed}`);
   console.log("================================================================================\n");
+
 }
 
 main().catch((err) => {
