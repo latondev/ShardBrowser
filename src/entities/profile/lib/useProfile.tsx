@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "../../../shared/lib/toast";
@@ -148,6 +149,23 @@ export const useProfile = create<ProfileStore>((set, get) => ({
   // total_runtime_ms — re-fetch so the Time column reflects the new total.
   startProcessPolling: () => {
     let cancelled = false;
+    let unlistenStopped: (() => void) | undefined;
+
+    listen<string>("profile-stopped", (event) => {
+      if (cancelled) return;
+      const profileId = event.payload;
+      const prev = get().running;
+      if (profileId in prev) {
+        const next = { ...prev };
+        delete next[profileId];
+        set({ running: next });
+        get().reload();
+      }
+    }).then((un) => {
+      if (cancelled) un();
+      else unlistenStopped = un;
+    });
+
     const tick = async () => {
       try {
         const list = await processList();
@@ -165,7 +183,11 @@ export const useProfile = create<ProfileStore>((set, get) => ({
     };
     tick();
     const handle = setInterval(tick, 2000);
-    return () => { cancelled = true; clearInterval(handle); };
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+      unlistenStopped?.();
+    };
   },
 
   setSearch: (search) => set({ search }),

@@ -36,7 +36,13 @@ impl Tracker {
     }
 
     /// Take a spawned child + monitor it; entry removed on exit/kill.
-    pub fn track(self: &'static Self, profile_id: String, mut child: Child, temporary: bool) -> u32 {
+    pub fn track(
+        self: &'static Self,
+        profile_id: String,
+        mut child: Child,
+        temporary: bool,
+        headless: bool,
+    ) -> u32 {
         let pid = child.id().unwrap_or(0);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
 
@@ -48,44 +54,52 @@ impl Tracker {
             );
         }
 
-        // Graceful shutdown (SIGTERM / taskkill WM_CLOSE) → 5s → hard kill.
-        // Graceful path flushes session state so next launch skips the restore prompt.
         let started_at = Instant::now();
         tokio::spawn(async move {
-            tokio::select! {
-                _ = child.wait() => {}
-                _ = rx.recv() => {
-                    #[cfg(unix)]
-                    {
-                        if let Some(p) = child.id() {
-                            // SAFETY: libc::kill on a child pid we own.
-                            unsafe { libc::kill(p as libc::pid_t, libc::SIGTERM); }
-                        }
+            let mut check_interval = tokio::time::interval(std::time::Duration::from_millis(1500));
+            check_interval.tick().await; // First tick fires immediately, skip it
+
+            let mut elapsed_checks: u32 = 0;
+            let mut no_window_streak: u32 = 0;
+            let mut saw_window_once = false;
+
+            loop {
+                tokio::select! {
+                    res = child.wait() => {
+                        let _ = res;
+                        break;
                     }
-                    #[cfg(windows)]
-                    {
-                        use std::os::windows::process::CommandExt;
-                        if let Some(p) = child.id() {
-                            // taskkill /PID without /F posts WM_CLOSE for clean shutdown.
-                            // 0x08000000 = CREATE_NO_WINDOW — suppress the console flash.
-                            let _ = std::process::Command::new("taskkill")
-                                .args(["/PID", &p.to_string()])
-                                .creation_flags(0x08000000)
-                                .stdout(std::process::Stdio::null())
-                                .stderr(std::process::Stdio::null())
-                                .status();
-                        }
+                    _ = rx.recv() => {
+                        Self::terminate_child(&mut child, pid).await;
+                        break;
                     }
-                    let graceful = tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        child.wait(),
-                    ).await;
-                    if graceful.is_err() {
-                        let _ = child.kill().await;
-                        let _ = child.wait().await;
+                    _ = check_interval.tick() => {
+                        elapsed_checks += 1;
+                        if !headless {
+                            #[cfg(windows)]
+                            {
+                                let has_window = win_util::has_active_browser_window(pid);
+                                if has_window {
+                                    saw_window_once = true;
+                                    no_window_streak = 0;
+                                } else {
+                                    // If window was active before or grace period elapsed (6s = 4 ticks),
+                                    // check if the browser GUI has been closed by the user.
+                                    if saw_window_once || elapsed_checks >= 4 {
+                                        no_window_streak += 1;
+                                        if no_window_streak >= 2 {
+                                            eprintln!("[launcher] Profile {profile_id} (PID {pid}): browser window closed; stopping background process");
+                                            Self::terminate_child(&mut child, pid).await;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
+
             if let Ok(mut g) = Self::shared().inner.lock() {
                 g.remove(&profile_id);
             }
@@ -104,9 +118,60 @@ impl Tracker {
                     Err(e) => eprintln!("[launcher] temporary profile {profile_id} cleanup failed: {e}"),
                 }
             }
+
+            // Cleanup any remaining orphaned child processes (GPU / renderer / utility)
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/T", "/PID", &pid.to_string()])
+                    .creation_flags(0x08000000)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
+
+            // Emit profile-stopped event to Tauri frontend so UI updates immediately
+            if let Some(w) = crate::main_window() {
+                use tauri::Emitter;
+                let _ = w.emit("profile-stopped", &profile_id);
+            }
+            crate::notify_store_changed("profiles");
         });
 
         pid
+    }
+
+    async fn terminate_child(child: &mut Child, _pid: u32) {
+        #[cfg(unix)]
+        {
+            if let Some(p) = child.id() {
+                // SAFETY: libc::kill on a child pid we own.
+                unsafe { libc::kill(p as libc::pid_t, libc::SIGTERM); }
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            if let Some(p) = child.id() {
+                // taskkill /PID without /F posts WM_CLOSE for clean shutdown.
+                // 0x08000000 = CREATE_NO_WINDOW — suppress the console flash.
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &p.to_string()])
+                    .creation_flags(0x08000000)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
+        }
+        let graceful = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            child.wait(),
+        ).await;
+        if graceful.is_err() {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
     }
 
     /// Attach CDP to a tracked profile; no-op if the profile already exited.
@@ -164,3 +229,84 @@ pub struct RunningProfile {
     /// "1h 23m" / "12m 30s" / "45s".
     pub uptime_ms: u64,
 }
+
+#[cfg(windows)]
+mod win_util {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    type HWND = *mut std::ffi::c_void;
+    type BOOL = i32;
+    type LPARAM = isize;
+    type DWORD = u32;
+
+    #[repr(C)]
+    struct RECT {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+
+    extern "system" {
+        fn EnumWindows(
+            lp_enum_func: Option<unsafe extern "system" fn(HWND, LPARAM) -> BOOL>,
+            l_param: LPARAM,
+        ) -> BOOL;
+        fn GetWindowThreadProcessId(h_wnd: HWND, lpdw_process_id: *mut DWORD) -> DWORD;
+        fn IsWindowVisible(h_wnd: HWND) -> BOOL;
+        fn GetClassNameW(h_wnd: HWND, lp_class_name: *mut u16, n_max_count: i32) -> i32;
+        fn GetWindowRect(h_wnd: HWND, lp_rect: *mut RECT) -> BOOL;
+    }
+
+    struct EnumContext {
+        target_pid: u32,
+        found: Arc<AtomicBool>,
+    }
+
+    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let ctx = &*(lparam as *const EnumContext);
+        let mut proc_id: DWORD = 0;
+        GetWindowThreadProcessId(hwnd, &mut proc_id);
+        if proc_id == ctx.target_pid {
+            if IsWindowVisible(hwnd) != 0 {
+                let mut class_buf = [0u16; 256];
+                let len = GetClassNameW(hwnd, class_buf.as_mut_ptr(), 256);
+                if len > 0 {
+                    let class_name = String::from_utf16_lossy(&class_buf[..len as usize]);
+                    if class_name == "Chrome_WidgetWin_1" {
+                        let mut rect = RECT {
+                            left: 0,
+                            top: 0,
+                            right: 0,
+                            bottom: 0,
+                        };
+                        if GetWindowRect(hwnd, &mut rect) != 0 {
+                            let width = rect.right - rect.left;
+                            let height = rect.bottom - rect.top;
+                            // Visible interactive browser window with substantial size
+                            if width > 50 && height > 50 {
+                                ctx.found.store(true, Ordering::SeqCst);
+                                return 0; // stop enumeration
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        1 // continue enumeration
+    }
+
+    pub fn has_active_browser_window(pid: u32) -> bool {
+        let found = Arc::new(AtomicBool::new(false));
+        let ctx = EnumContext {
+            target_pid: pid,
+            found: found.clone(),
+        };
+        unsafe {
+            EnumWindows(Some(enum_proc), &ctx as *const _ as LPARAM);
+        }
+        found.load(Ordering::SeqCst)
+    }
+}
+

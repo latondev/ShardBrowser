@@ -103,6 +103,10 @@ pub async fn launch_profile(
     cmd.arg("--test-type");
     cmd.arg("--silent-debugger-extension-api");
     cmd.arg("--password-store=basic");
+    cmd.arg("--disable-background-mode");
+    cmd.arg("--disable-background-networking");
+    cmd.arg("--disable-component-update");
+    cmd.arg("--no-service-autorun");
 
     // Disable WebGPU when profile omits `webgpu` (matches real Linux Chrome).
     let webgpu_present = raw
@@ -270,7 +274,7 @@ pub async fn launch_profile(
         }
     }
     let child = cmd.spawn().context("spawn ShardX")?;
-    let pid = Tracker::shared().track(profile_id.to_string(), child, stored.meta.temporary);
+    let pid = Tracker::shared().track(profile_id.to_string(), child, stored.meta.temporary, headless);
 
     profile::touch_launched(profile_id, None)?;
 
